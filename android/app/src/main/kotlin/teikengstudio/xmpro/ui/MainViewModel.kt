@@ -709,15 +709,16 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
     ) {
         viewModelScope.launch {
             try {
-                val credentials = withContext(Dispatchers.IO) { login.verifySms(challengeId, code) }
-                val identity = withContext(Dispatchers.IO) { container.signIn(credentials, makePrimary) }
+                val result = withContext(Dispatchers.IO) { login.verifySms(challengeId, code) }
+                val identity = withContext(Dispatchers.IO) { container.signIn(result, makePrimary) }
+                val credentials = result.credentials
                 _state.update {
                     it.copy(
                         signedIn = true,
                         account = identity,
                         accounts = container.accounts(),
                         autoClaim = container.autoClaim(),
-                        message = "已登录账号 ${credentials.uid}",
+                        message = "已登录 " + result.nickname.ifEmpty { "账号 ${credentials.uid}" },
                     )
                 }
                 refreshListening()

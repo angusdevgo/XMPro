@@ -123,8 +123,8 @@ class XmlyLogin(
         }
     }
 
-    /** Verifies the SMS code and exchanges it for account credentials. */
-    fun verifySms(challengeId: String, code: String): Credentials {
+    /** Verifies the SMS code and exchanges it for credentials plus profile. */
+    fun verifySms(challengeId: String, code: String): teikengstudio.xmpro.model.LoginResult {
         if (!Regex("^[A-Za-z0-9_-]{1,128}$").matches(challengeId)) {
             throw XmlyException("challenge_invalid", "需要有效的短信验证请求", definitive = true)
         }
@@ -184,7 +184,23 @@ class XmlyLogin(
                     throw XmlyException("invalid_response", "登录响应缺少有效账号凭据")
                 }
                 pending = null
-                Credentials("$uid&$token", active.deviceId)
+                val scopes = listOfNotNull(login, nested)
+                fun field(vararg keys: String): String {
+                    for (scope in scopes) {
+                        for (key in keys) {
+                            val value = scope.opt(key) as? String
+                            if (!value.isNullOrBlank()) return value
+                        }
+                    }
+                    return ""
+                }
+                teikengstudio.xmpro.model.LoginResult(
+                    credentials = Credentials("$uid&$token", active.deviceId),
+                    nickname = field("nickname", "userName", "nickName"),
+                    avatarUrl = field("avatar", "avatarUrl", "logoPic", "smallLogo")
+                        .takeIf { it.isNotEmpty() },
+                    mobile = field("mobile", "phone", "mobilePhone"),
+                )
             } finally {
                 if (active.attempts >= 5 && pending === active) pending = null
             }

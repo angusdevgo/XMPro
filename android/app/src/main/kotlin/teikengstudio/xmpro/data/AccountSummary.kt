@@ -23,6 +23,7 @@ class AccountSummary(
     val quotaRejected: Boolean = false,
     val nickname: String = "",
     val avatarUrl: String? = null,
+    val mobile: String = "",
 ) {
     val balance: Quota? = quota?.let {
         runCatching {

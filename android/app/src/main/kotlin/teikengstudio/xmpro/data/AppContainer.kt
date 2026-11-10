@@ -65,6 +65,23 @@ class AppContainer(context: Context) {
 
     fun signIn(input: String): String = signIn(Credentials.parse(input), makePrimary = true)
 
+    /** Stores an account created by SMS login together with its profile. */
+    fun signIn(result: teikengstudio.xmpro.model.LoginResult, makePrimary: Boolean): String {
+        val identity = signIn(result.credentials, makePrimary)
+        if (result.nickname.isNotEmpty() || result.avatarUrl != null || result.mobile.isNotEmpty()) {
+            store.transaction { state ->
+                val record = state.optJSONObject("accounts")?.optJSONObject(identity) ?: return@transaction
+                if (result.nickname.isNotEmpty()) record.put("nickname", result.nickname)
+                result.avatarUrl?.let { record.put("avatar", it) }
+                if (result.mobile.isNotEmpty()) record.put("mobile", maskMobile(result.mobile))
+            }
+        }
+        return identity
+    }
+
+    private fun maskMobile(mobile: String): String =
+        if (mobile.length >= 7) mobile.take(3) + "****" + mobile.takeLast(4) else mobile
+
     /**
      * Stores the account without secrets.
      *
@@ -130,6 +147,7 @@ class AppContainer(context: Context) {
                     quotaRejected = record.optBoolean("quotaError", false),
                     nickname = record.optString("localName").ifEmpty { record.optString("nickname") },
                     avatarUrl = record.optString("avatar").takeIf { it.isNotEmpty() },
+                    mobile = record.optString("mobile"),
                 )
             }
             .sortedWith(compareByDescending<AccountSummary> { it.primary }.thenByDescending { it.active })

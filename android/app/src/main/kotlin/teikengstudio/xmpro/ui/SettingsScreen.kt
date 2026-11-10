@@ -459,7 +459,11 @@ private fun ProfileCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "UID ${account.uid}" + if (account.primary) " · 主账号" else "",
+                        listOfNotNull(
+                            account.mobile.takeIf { it.isNotEmpty() },
+                            "UID ${account.uid}",
+                            if (account.primary) "主账号" else null,
+                        ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
