@@ -150,9 +150,11 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                     smsLogin = remember(viewModel) {
                         SmsLoginCallbacks(
                             captchaId = viewModel.geetestConfig()["captcha_id"] as String,
-                            sendSms = { mobile, fields -> viewModel.sendSms(mobile, fields) },
-                            verifySms = { challenge, code, primary ->
-                                viewModel.verifySms(challenge, code, primary)
+                            sendSms = { mobile, fields, done ->
+                                viewModel.sendSms(mobile, fields, done)
+                            },
+                            verifySms = { challenge, code, primary, done ->
+                                viewModel.verifySms(challenge, code, primary, done)
                             },
                             cancel = viewModel::cancelSmsLogin,
                         )

@@ -561,15 +561,29 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
 
     fun geetestConfig(): Map<String, Any> = login.config()
 
-    fun sendSms(mobile: String, geetest: Map<String, String>): String {
-        return try {
-            login.sendSms(mobile, geetest)
-        } catch (error: Exception) {
-            throw error
+    /** Sends one SMS off the main thread; [onResult] gets the challenge or an error. */
+    fun sendSms(
+        mobile: String,
+        geetest: Map<String, String>,
+        onResult: (challenge: String?, error: String?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            try {
+                val challenge = withContext(Dispatchers.IO) { login.sendSms(mobile, geetest) }
+                onResult(challenge, null)
+            } catch (error: Exception) {
+                onResult(null, describe(error))
+            }
         }
     }
 
-    fun verifySms(challengeId: String, code: String, makePrimary: Boolean) {
+    /** Verifies the code and commits the account; the dialog shows the result. */
+    fun verifySms(
+        challengeId: String,
+        code: String,
+        makePrimary: Boolean,
+        onResult: (error: String?) -> Unit,
+    ) {
         viewModelScope.launch {
             try {
                 val credentials = withContext(Dispatchers.IO) { login.verifySms(challengeId, code) }
@@ -585,8 +599,9 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                 }
                 refreshListening()
                 loadHome()
+                onResult(null)
             } catch (error: Exception) {
-                _state.update { it.copy(message = describe(error)) }
+                onResult(describe(error))
             }
         }
     }

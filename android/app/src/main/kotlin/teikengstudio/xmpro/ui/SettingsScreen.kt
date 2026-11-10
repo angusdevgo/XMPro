@@ -272,8 +272,8 @@ private fun CookieDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
 /** Everything the SMS dialog needs from the view model. */
 class SmsLoginCallbacks(
     val captchaId: String,
-    val sendSms: (String, Map<String, String>) -> String,
-    val verifySms: (String, String, Boolean) -> Unit,
+    val sendSms: (String, Map<String, String>, (String?, String?) -> Unit) -> Unit,
+    val verifySms: (String, String, Boolean, (String?) -> Unit) -> Unit,
     val cancel: () -> Unit,
 )
 
@@ -291,6 +291,16 @@ private fun SmsLoginDialog(
     var busy by remember { mutableStateOf(false) }
     var showCaptcha by remember { mutableStateOf(false) }
     var makePrimary by remember { mutableStateOf(true) }
+
+    fun verify() {
+        val active = challenge ?: return
+        busy = true
+        error = null
+        callbacks.verifySms(active, code, makePrimary) { failure ->
+            busy = false
+            if (failure == null) onSignedIn() else error = failure
+        }
+    }
 
     LaunchedEffect(Unit) {
         callbacks.cancel()
@@ -325,7 +335,7 @@ private fun SmsLoginDialog(
                     enabled = !busy && challenge == null && phone.length >= 6,
                     modifier = Modifier.padding(top = 8.dp),
                 ) {
-                    Text("安全验证并发送短信")
+                    Text(if (challenge == null) "安全验证并发送短信" else "短信已发送")
                 }
                 if (challenge != null) {
                     OutlinedTextField(
@@ -336,11 +346,7 @@ private fun SmsLoginDialog(
                         enabled = !busy,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = {
-                            if (!busy && code.length >= 4) {
-                                busy = true
-                                error = null
-                                callbacks.verifySms(challenge ?: "", code, makePrimary)
-                            }
+                            if (!busy && code.length >= 4) verify()
                         }),
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     )
@@ -364,15 +370,9 @@ private fun SmsLoginDialog(
         confirmButton = {
             if (challenge != null) {
                 TextButton(
-                    onClick = {
-                        if (!busy && code.length >= 4) {
-                            busy = true
-                            error = null
-                            callbacks.verifySms(challenge ?: "", code, makePrimary)
-                        }
-                    },
+                    onClick = { if (!busy && code.length >= 4) verify() },
                     enabled = !busy && code.length >= 4,
-                ) { Text("验证并登录") }
+                ) { Text(if (busy) "登录中…" else "验证并登录") }
             }
         },
         dismissButton = {
@@ -394,10 +394,14 @@ private fun SmsLoginDialog(
                 showCaptcha = false
                 busy = true
                 error = null
-                runCatching { callbacks.sendSms(phone, fields) }
-                    .onSuccess { challenge = it }
-                    .onFailure { error = it.message ?: "短信发送未完成" }
-                busy = false
+                callbacks.sendSms(phone, fields) { result, failure ->
+                    busy = false
+                    if (result != null) {
+                        challenge = result
+                    } else {
+                        error = failure ?: "短信发送未完成，请重试"
+                    }
+                }
             },
         )
     }
