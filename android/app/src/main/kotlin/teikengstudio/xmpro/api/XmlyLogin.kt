@@ -179,9 +179,7 @@ class XmlyLogin(
                     "quick_login",
                 )
                 checkActive(active)
-                android.util.Log.d("XmlyLoginKeys", login.keys().asSequence().toList().toString())
                 val nested = login.optJSONObject("data")
-                nested?.let { android.util.Log.d("XmlyLoginKeys", "data:" + it.keys().asSequence().toList().toString()) }
                 val rawUid = login.opt("uid")?.takeIf { it != "" && it != false && it != 0 } ?: nested?.opt("uid")
                 val rawToken = login.opt("token")?.takeIf { it != "" && it != false && it != 0 } ?: nested?.opt("token")
                 val uid = rawUid?.toString()

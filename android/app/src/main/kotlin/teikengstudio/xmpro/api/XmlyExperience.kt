@@ -319,32 +319,86 @@ class XmlyExperience(private val client: XmlyClient) {
     fun profile(): teikengstudio.xmpro.model.UserProfile {
         requireAccount()
         val uid = client.context()["uid"] ?: throw invalid
-        val response = client.request(
-            "GET",
-            XmlyClient.MOBILE,
-            "/mobile-user/user/detail",
-            query = mapOf("uid" to uid, "device" to "android"),
-            headers = buildMap {
-                put("User-Agent", "ting_9.5.1(M2102J2SC,Android31)")
-                client.mainAppCookie()?.let { put("Cookie", it) }
-            },
-        )
-        val data = response.optJSONObject("data")
-            ?: response.optJSONObject("user")
-            ?: throw XmlyException("profile_unavailable", "账号资料不可用")
-        fun text(vararg keys: String): String {
-            for (key in keys) {
-                val value = data.opt(key) as? String
-                if (!value.isNullOrBlank()) return value
-            }
-            return ""
+        val payload = profilePayload(uid)
+        val nickname = findString(payload, setOf("nickname", "userName", "name", "nickName")) ?: ""
+        val avatar = findString(payload, setOf("avatar", "avatarUrl", "logoPic", "smallLogo", "cover"))
+        val mobile = findString(payload, setOf("mobile", "phone", "mobilePhone")) ?: ""
+        if (nickname.isEmpty() && avatar == null && mobile.isEmpty()) {
+            throw XmlyException("profile_unavailable", "账号资料不可用", definitive = true)
         }
         return teikengstudio.xmpro.model.UserProfile(
             uid = uid,
-            nickname = text("nickname", "userName", "name"),
-            avatarUrl = text("avatar", "avatarUrl", "smallLogo", "logoPic").takeIf { it.isNotEmpty() },
-            intro = text("personalSignature", "intro", "description"),
+            nickname = nickname,
+            avatarUrl = avatar?.takeIf { it.startsWith("http") },
+            intro = findString(payload, setOf("personalSignature", "intro", "description")) ?: "",
         )
+    }
+
+    /**
+     * Main-site endpoint first: the passport cookie is accepted by
+     * `revision/my/getCurrentUserInfo`, while the mobile-user routes answer an
+     * empty 404 for lite tokens.
+     */
+    private fun profilePayload(uid: String): JSONObject {
+        val attempts = listOf<() -> JSONObject>(
+            {
+                client.request(
+                    "GET",
+                    XmlyHttp.SEARCH_ORIGIN,
+                    "/revision/my/getCurrentUserInfo",
+                )
+            },
+            {
+                client.request(
+                    "GET",
+                    XmlyClient.MOBILE,
+                    "/mobile-user/user/detail",
+                    query = mapOf("uid" to uid, "device" to "android"),
+                )
+            },
+        )
+        var last: XmlyException? = null
+        for (attempt in attempts) {
+            try {
+                val payload = attempt()
+                if (payload.optJSONObject("data") != null || payload.has("uid")) return payload
+            } catch (error: XmlyException) {
+                last = error
+            }
+        }
+        throw last ?: XmlyException("profile_unavailable", "账号资料不可用", definitive = true)
+    }
+
+    /** Breadth-first search for the first non-blank string under [keys]. */
+    private fun findString(root: JSONObject, keys: Set<String>): String? {
+        val queue = ArrayDeque<Any>()
+        queue.add(root)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < 3000) {
+            visited++
+            when (val node = queue.removeFirst()) {
+                is JSONObject -> {
+                    for (key in node.keys()) {
+                        if (key in keys) {
+                            val value = node.opt(key) as? String
+                            if (!value.isNullOrBlank()) return value
+                        }
+                    }
+                    for (key in node.keys()) {
+                        when (val child = node.opt(key)) {
+                            is JSONObject, is JSONArray -> queue.add(child)
+                        }
+                    }
+                }
+
+                is JSONArray -> for (index in 0 until node.length()) {
+                    when (val child = node.opt(index)) {
+                        is JSONObject, is JSONArray -> queue.add(child)
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private fun get(path: String, query: Map<String, String>): JSONObject {
