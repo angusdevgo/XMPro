@@ -7,6 +7,7 @@ import teikengstudio.xmpro.api.XmlyHttp
 import teikengstudio.xmpro.api.XmlyRewards
 import teikengstudio.xmpro.model.Credentials
 import teikengstudio.xmpro.model.Quota
+import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.XmlyException
 import java.io.File
 
@@ -45,18 +46,6 @@ class AppContainer(context: Context) {
 
     val ledger = UsageLedger(store, quotaSource)
 
-    val downloads by lazy {
-        teikengstudio.xmpro.download.DownloadManager(
-            context = appContext,
-            storage = store,
-            directory = { downloadRoot() },
-            resolve = { number ->
-                val resolved = client(activeAccount).resolve(number)
-                resolved.url to resolved.actualQuality
-            },
-        )
-    }
-
     val playback = teikengstudio.xmpro.player.PlaybackController(appContext).apply {
         // Connecting early keeps the RPC warm; the service itself only starts
         // when a media item is set.
@@ -84,7 +73,13 @@ class AppContainer(context: Context) {
     fun signIn(parsed: Credentials, makePrimary: Boolean): String {
         val quota = runCatching { client(parsed).quota(parsed.identity) }.getOrNull()
         credentials.save(parsed)
-        if (makePrimary || activeAccount == null) activeAccount = parsed.identity
+        // Always activate something: an imported account that is not promoted to
+        // primary must still be usable, otherwise the app looks logged out.
+        activeAccount = when {
+            makePrimary -> parsed.identity
+            activeAccount != null -> activeAccount
+            else -> parsed.identity
+        }
         store.transaction { state ->
             val accounts = state.optJSONObject("accounts")
                 ?: org.json.JSONObject().also { state.put("accounts", it) }
@@ -238,6 +233,55 @@ class AppContainer(context: Context) {
         }
     }
 
+    // ---------------------------------------------------------------- bookmarks
+
+    fun bookmarks(): List<Bookmark> {
+        val identity = activeAccount ?: return emptyList()
+        val library = store.state().optJSONObject("library")?.optJSONObject(identity)
+        val items = library?.optJSONArray("bookmarks") ?: return emptyList()
+        return (0 until items.length()).mapNotNull { index ->
+            items.optJSONObject(index)?.let { Bookmark.fromJson(it) }
+        }.sortedByDescending { it.createdAt }
+    }
+
+    /** Adds or refreshes the bookmark for one track. */
+    fun addBookmark(track: Track, positionMs: Long): List<Bookmark> {
+        val identity = activeAccount ?: return emptyList()
+        val position = positionMs.coerceAtLeast(0)
+        store.transaction { state ->
+            val library = state.optJSONObject("library")
+                ?: org.json.JSONObject().also { state.put("library", it) }
+            val account = library.optJSONObject(identity)
+                ?: org.json.JSONObject().also { library.put(identity, it) }
+            val existing = account.optJSONArray("bookmarks") ?: org.json.JSONArray()
+            val kept = org.json.JSONArray()
+            for (index in 0 until existing.length()) {
+                val item = existing.optJSONObject(index) ?: continue
+                if (Bookmark.fromJson(item)?.track?.id == track.id) continue
+                kept.put(item)
+            }
+            kept.put(Bookmark(track, position, System.currentTimeMillis()).toJson())
+            account.put("bookmarks", kept)
+        }
+        return bookmarks()
+    }
+
+    fun removeBookmark(trackId: String): List<Bookmark> {
+        val identity = activeAccount ?: return emptyList()
+        store.transaction { state ->
+            val account = state.optJSONObject("library")?.optJSONObject(identity) ?: return@transaction
+            val existing = account.optJSONArray("bookmarks") ?: return@transaction
+            val kept = org.json.JSONArray()
+            for (index in 0 until existing.length()) {
+                val item = existing.optJSONObject(index) ?: continue
+                if (Bookmark.fromJson(item)?.track?.id == trackId) continue
+                kept.put(item)
+            }
+            account.put("bookmarks", kept)
+        }
+        return bookmarks()
+    }
+
     // ---------------------------------------------------------------- settings
 
     fun themeMode(): String = store.state().optJSONObject("settings")
@@ -261,17 +305,6 @@ class AppContainer(context: Context) {
             appearance.put("oledBlack", enabled)
         }
     }
-
-    /** Completed audio files, newest first. */
-    fun downloads(): List<File> {
-        val root = downloadRoot()
-        return root.listFiles { file -> file.isFile && file.length() > 0 }
-            ?.sortedByDescending { it.lastModified() }
-            ?: emptyList()
-    }
-
-    fun downloadRoot(): File =
-        File(appContext.getExternalFilesDir(null) ?: appContext.filesDir, "downloads").apply { mkdirs() }
 
     fun close() {
         store.close()

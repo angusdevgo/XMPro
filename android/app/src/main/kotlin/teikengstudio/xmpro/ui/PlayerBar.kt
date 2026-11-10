@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,7 +36,7 @@ fun PlayerBar(
     onOpenPlayer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val title = state.playingTitle ?: return
+    val title = state.playingTitle
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -49,6 +50,40 @@ fun PlayerBar(
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f))
                 .clickable(onClick = onOpenPlayer),
         ) {
+            if (title == null) {
+                Row(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text("尚未选择声音", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "打开播放器",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.PlaylistPlay,
+                        contentDescription = "播放列表",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                return@Column
+            }
             val progress = if (state.durationMs > 0) {
                 (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
             } else {

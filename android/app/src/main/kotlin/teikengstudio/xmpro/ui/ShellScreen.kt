@@ -9,11 +9,9 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
@@ -34,12 +32,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import teikengstudio.xmpro.data.AppContainer
 
-private enum class Destination { Home, Listening, Downloads, Settings }
+private enum class Destination { Home, Listening, Settings }
 
 private val navItems = listOf(
     FloatingNavItem("主页", Icons.Filled.Home, Icons.Outlined.Home),
     FloatingNavItem("听过", Icons.Filled.Headphones, Icons.Outlined.Headphones),
-    FloatingNavItem("下载", Icons.Filled.Download, Icons.Outlined.Download),
     FloatingNavItem("设置", Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
@@ -54,7 +51,8 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
     val snackbar = remember { SnackbarHostState() }
     val selected = Destination.entries[selectedIndex]
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val playerVisible = state.playingTitle != null
+    // The bar is always present: idle it offers "尚未选择声音 / 打开播放器".
+    val playerVisible = true
     // An opened album is an overlay above whichever tab started it, so 听过 and
     // 下载 can open albums too and come back to their own list.
     val albumOpen = state.album != null || state.albumLoading || state.albumError != null
@@ -64,6 +62,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
     LaunchedEffect(Unit) {
         if (state.channels.isEmpty()) viewModel.loadHome()
         viewModel.refreshListening()
+        viewModel.refreshBookmarks()
     }
 
     LaunchedEffect(state.message) {
@@ -86,11 +85,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                     bottomInset = contentBottom,
                     onBack = viewModel::closeAlbum,
                     onPlay = viewModel::playAlbum,
-                    onDownload = viewModel::download,
                     onSubscribe = viewModel::setSubscribed,
-                    onSubscribeAll = { 
-                        state.album?.tracks?.firstOrNull()?.let(viewModel::download)
-                    },
                 )
             } else when (selected) {
                 Destination.Home -> {
@@ -102,8 +97,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                         onRefreshHome = viewModel::loadHome,
                         onOpenAlbum = viewModel::openAlbum,
                         onPlay = { viewModel.play(it) },
-                        onDownload = viewModel::download,
-                        onSelectChannel = viewModel::selectChannel,
+                            onSelectChannel = viewModel::selectChannel,
                         onSelectTab = viewModel::selectTab,
                     )
                 }
@@ -120,23 +114,12 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                             viewModel.playUpdates(track)
                         }
                     },
-                    onDownload = viewModel::download,
                     onUnsubscribe = { viewModel.setSubscribed(it, false) },
                     onUnfavorite = { viewModel.setFavorite(it, false) },
                     onLoadMoreUpdates = viewModel::loadMoreUpdates,
                     onLoadMoreSubscriptions = viewModel::loadMoreSubscriptions,
                     onLoadMoreFavorites = viewModel::loadMoreFavorites,
-                )
-
-                Destination.Downloads -> DownloadsScreen(
-                    state = state,
-                    bottomInset = contentBottom,
-                    onPlayFile = viewModel::playFile,
-                    onDelete = viewModel::deleteDownload,
-                    onRefresh = viewModel::refreshDownloads,
-                    onPauseTask = viewModel::pauseDownload,
-                    onResumeTask = viewModel::resumeDownload,
-                    onCancelTask = viewModel::cancelDownload,
+                    onRemoveBookmark = viewModel::removeBookmark,
                 )
 
                 Destination.Settings -> SettingsScreen(
@@ -193,6 +176,8 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                 onSeek = viewModel::seekTo,
                 onCycleSpeed = viewModel::cycleSpeed,
                 onFavorite = viewModel::toggleFavoriteOfPlaying,
+                isFavorite = state.playing?.let { track -> track.id in state.favoriteIds } == true,
+                onBookmark = viewModel::saveBookmark,
                 onSleepTimer = viewModel::setSleepTimer,
                 onSelectQueue = { index ->
                     viewModel.playQueue(state.queue, index)

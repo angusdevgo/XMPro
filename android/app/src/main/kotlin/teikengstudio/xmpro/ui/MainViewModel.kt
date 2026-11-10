@@ -3,7 +3,6 @@ package teikengstudio.xmpro.ui
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -19,7 +18,6 @@ import teikengstudio.xmpro.api.XmlyHistory
 import teikengstudio.xmpro.api.XmlyLogin
 import teikengstudio.xmpro.data.AccountSummary
 import teikengstudio.xmpro.data.AppContainer
-import teikengstudio.xmpro.download.DownloadTask
 import teikengstudio.xmpro.model.Album
 import teikengstudio.xmpro.model.AlbumPage
 import teikengstudio.xmpro.model.HistoryRecord
@@ -48,9 +46,6 @@ data class UiState(
     val isPlaying: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
-    val downloads: List<File> = emptyList(),
-    val downloadProgress: Map<String, Float> = emptyMap(),
-    val downloadTasks: List<DownloadTask> = emptyList(),
     val message: String? = null,
     val channels: List<HomeChannel> = emptyList(),
     val channelId: Int = 0,
@@ -79,6 +74,8 @@ data class UiState(
     val queueIndex: Int = 0,
     val speed: Float = 1f,
     val sleepAtMillis: Long? = null,
+    val bookmarks: List<teikengstudio.xmpro.data.Bookmark> = emptyList(),
+    val favoriteIds: Set<String> = emptySet(),
 )
 
 class MainViewModel(context: Context, private val container: AppContainer) : ViewModel() {
@@ -90,24 +87,23 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
     private var sessionStartedAt = 0L
     private var sleepJob: Job? = null
 
+    private val initialAccounts = container.accounts()
+
     private val _state = MutableStateFlow(
         UiState(
-            signedIn = container.isSignedIn(container.activeAccount),
-            account = container.activeAccount,
-            downloads = container.downloads(),
-            accounts = container.accounts(),
+            // Any stored account counts as signed in; the active one may be unset
+            // after a partial import and must not look like a logout.
+            signedIn = initialAccounts.isNotEmpty(),
+            account = container.activeAccount ?: initialAccounts.firstOrNull()?.identity,
+            accounts = initialAccounts,
             autoClaim = container.autoClaim(),
+            bookmarks = container.bookmarks(),
         ),
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     init {
         // The service owns the player; mirror its state into the UI model.
-        viewModelScope.launch {
-            container.downloads.tasks.collect { list ->
-                _state.update { it.copy(downloadTasks = list) }
-            }
-        }
         viewModelScope.launch {
             playback.error.collect { failure ->
                 if (failure != null) _state.update { it.copy(message = failure) }
@@ -339,16 +335,10 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
         }
     }
 
+    /** Adds or removes the playing track from favourites. */
     fun toggleFavoriteOfPlaying() {
         val track = _state.value.playing ?: return
-        setFavorite(track, true)
-    }
-
-    fun playFile(file: File) {
-        sessionTrack = null
-        playback.start(file.toURI().toString(), file.nameWithoutExtension) {
-            _state.update { it.copy(playing = null) }
-        }
+        setFavorite(track, track.id !in _state.value.favoriteIds)
     }
 
     fun togglePlayback() {
@@ -394,25 +384,6 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
         }
     }
 
-    // --------------------------------------------------------------- downloads
-
-    fun download(track: Track) {
-        container.downloads.enqueue(track)
-    }
-
-    fun pauseDownload(task: DownloadTask) = container.downloads.pause(task.id)
-
-    fun resumeDownload(task: DownloadTask) = container.downloads.resume(task.id)
-
-    fun cancelDownload(task: DownloadTask) = container.downloads.cancel(task.id)
-
-    fun refreshDownloads() = _state.update { it.copy(downloads = container.downloads()) }
-
-    fun deleteDownload(file: File) {
-        file.delete()
-        _state.update { it.copy(downloads = container.downloads()) }
-    }
-
     // ------------------------------------------------- listening / subscriptions
 
     fun refreshListening() {
@@ -444,7 +415,14 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                 .onFailure { failure = failure ?: describe(it) }
             runCatching { withContext(Dispatchers.IO) { experience.favorites(1) } }
                 .onSuccess { page ->
-                    _state.update { it.copy(favorites = page.items, moreFavorites = page.hasMore, favoritePage = 1) }
+                    _state.update {
+                        it.copy(
+                            favorites = page.items,
+                            moreFavorites = page.hasMore,
+                            favoritePage = 1,
+                            favoriteIds = page.items.map { track -> track.id }.toSet(),
+                        )
+                    }
                 }
                 .onFailure { failure = failure ?: describe(it) }
             _state.update { it.copy(listeningLoading = false, listeningError = failure) }
@@ -509,6 +487,7 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                         favorites = it.favorites + result.items.filterNot { track ->
                             it.favorites.any { known -> known.id == track.id }
                         },
+                        favoriteIds = it.favoriteIds + result.items.map { track -> track.id },
                         moreFavorites = result.hasMore,
                         favoritePage = page,
                     )
@@ -527,6 +506,7 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                 _state.update {
                     it.copy(
                         favorites = if (favorite) it.favorites + track else it.favorites.filterNot { row -> row.id == track.id },
+                        favoriteIds = if (favorite) it.favoriteIds + track.id else it.favoriteIds - track.id,
                         message = if (favorite) "已收藏" else "已取消收藏",
                     )
                 }
@@ -553,6 +533,27 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                 _state.update { it.copy(message = describe(error)) }
             }
         }
+    }
+
+    // ---------------------------------------------------------------- bookmarks
+
+    fun refreshBookmarks() = _state.update { it.copy(bookmarks = container.bookmarks()) }
+
+    /** Saves the current playback position as a bookmark. */
+    fun saveBookmark() {
+        val track = _state.value.playing ?: return
+        val position = playback.currentPosition()
+        runCatching {
+            val list = container.addBookmark(track, position)
+            _state.update { it.copy(bookmarks = list, message = "已保存书签") }
+        }.onFailure { error -> _state.update { it.copy(message = describe(error)) } }
+    }
+
+    fun removeBookmark(trackId: String) {
+        runCatching {
+            val list = container.removeBookmark(trackId)
+            _state.update { it.copy(bookmarks = list, message = "已删除书签") }
+        }.onFailure { error -> _state.update { it.copy(message = describe(error)) } }
     }
 
     // ----------------------------------------------------------------- account
@@ -595,8 +596,16 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
         }
     }
 
-    fun refreshAccounts() = _state.update {
-        it.copy(accounts = container.accounts(), autoClaim = container.autoClaim())
+    fun refreshAccounts() {
+        val list = container.accounts()
+        _state.update {
+            it.copy(
+                accounts = list,
+                autoClaim = container.autoClaim(),
+                signedIn = list.isNotEmpty(),
+                account = container.activeAccount ?: list.firstOrNull()?.identity,
+            )
+        }
     }
 
     fun setPrimaryAccount(identity: String) = accountAction({ container.setPrimaryAccount(identity) }, "已切换主账号")

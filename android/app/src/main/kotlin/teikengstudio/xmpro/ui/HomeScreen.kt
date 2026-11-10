@@ -22,11 +22,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -67,7 +65,6 @@ fun HomeScreen(
     onRefreshHome: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     onPlay: (Track) -> Unit,
-    onDownload: (Track) -> Unit,
     onSelectChannel: (Int) -> Unit,
     onSelectTab: (Int) -> Unit,
 ) {
@@ -183,12 +180,7 @@ fun HomeScreen(
                     }
                 } else {
                     items(state.tracks, key = { "track-${it.id}" }) { track ->
-                        TrackRow(
-                            track = track,
-                            progress = state.downloadProgress[track.number],
-                            onPlay = { onPlay(track) },
-                            onDownload = { onDownload(track) },
-                        )
+                        TrackRow(track = track, onPlay = { onPlay(track) })
                         HorizontalDivider()
                     }
                 }
@@ -359,7 +351,7 @@ fun Cover(url: String?, size: Int) {
 }
 
 @Composable
-fun TrackRow(track: Track, progress: Float?, onPlay: () -> Unit, onDownload: () -> Unit) {
+fun TrackRow(track: Track, onPlay: () -> Unit) {
     ListItem(
         headlineContent = { Text(track.title.ifEmpty { track.number }, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
@@ -372,23 +364,8 @@ fun TrackRow(track: Track, progress: Float?, onPlay: () -> Unit, onDownload: () 
         },
         leadingContent = { Cover(track.coverUrl, 44) },
         trailingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (progress != null) {
-                    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    }
-                } else {
-                    IconButton(onClick = onDownload) {
-                        Icon(Icons.Filled.Download, contentDescription = "下载")
-                    }
-                }
-                IconButton(onClick = onPlay) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = "播放")
-                }
+            IconButton(onClick = onPlay) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = "播放")
             }
         },
     )

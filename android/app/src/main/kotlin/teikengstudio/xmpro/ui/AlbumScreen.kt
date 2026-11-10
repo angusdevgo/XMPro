@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.HorizontalDivider
@@ -40,9 +39,7 @@ fun AlbumScreen(
     bottomInset: Dp,
     onBack: () -> Unit,
     onPlay: (Track) -> Unit,
-    onDownload: (Track) -> Unit,
     onSubscribe: (String, Boolean) -> Unit,
-    onSubscribeAll: (String) -> Unit,
 ) {
     val page = state.album
     val album = page?.album
@@ -86,11 +83,6 @@ fun AlbumScreen(
                 AssistChip(
                     onClick = { onSubscribe(album.id, !subscribed) },
                     label = { Text(if (subscribed) "已订阅" else "订阅") },
-                )
-                AssistChip(
-                    onClick = { onSubscribeAll(album.id) },
-                    label = { Text("下载全部") },
-                    leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 )
                 AssistChip(
                     onClick = { page.tracks.firstOrNull()?.let(onPlay) },
@@ -144,13 +136,8 @@ fun AlbumScreen(
                         supportingContent = { Text(formatDuration(track.duration)) },
                         leadingContent = { Cover(track.coverUrl ?: page.album.coverUrl, 44) },
                         trailingContent = {
-                            Row {
-                                IconButton(onClick = { onDownload(track) }) {
-                                    Icon(Icons.Filled.Download, contentDescription = "下载")
-                                }
-                                IconButton(onClick = { onPlay(track) }) {
-                                    Icon(Icons.Filled.PlayArrow, contentDescription = "播放")
-                                }
+                            IconButton(onClick = { onPlay(track) }) {
+                                Icon(Icons.Filled.PlayArrow, contentDescription = "播放")
                             }
                         },
                         modifier = Modifier.clickable { onPlay(track) },

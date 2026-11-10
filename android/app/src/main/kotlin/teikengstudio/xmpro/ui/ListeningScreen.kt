@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Badge
 import androidx.compose.material3.HorizontalDivider
@@ -46,7 +45,7 @@ import teikengstudio.xmpro.model.SubscriptionItem
 import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.UpdateItem
 
-private val tabs = listOf("听更新", "订阅", "历史", "收藏")
+private val tabs = listOf("听更新", "订阅", "历史", "收藏", "书签")
 
 @Composable
 fun ListeningScreen(
@@ -55,12 +54,12 @@ fun ListeningScreen(
     onRefresh: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     onPlay: (Track, Long) -> Unit,
-    onDownload: (Track) -> Unit,
     onUnsubscribe: (String) -> Unit,
     onUnfavorite: (Track) -> Unit,
     onLoadMoreUpdates: () -> Unit,
     onLoadMoreSubscriptions: () -> Unit,
     onLoadMoreFavorites: () -> Unit,
+    onRemoveBookmark: (String) -> Unit,
 ) {
     var selected by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
@@ -109,7 +108,6 @@ fun ListeningScreen(
                 filter = filtered,
                 onOpenAlbum = onOpenAlbum,
                 onPlay = onPlay,
-                onDownload = onDownload,
                 onLoadMore = onLoadMoreUpdates,
             )
 
@@ -129,15 +127,22 @@ fun ListeningScreen(
                 onPlay = onPlay,
             )
 
-            else -> FavoritesTab(
+            3 -> FavoritesTab(
                 state = state,
                 bottomInset = bottomInset,
                 filter = filtered,
                 onOpenAlbum = onOpenAlbum,
                 onPlay = onPlay,
-                onDownload = onDownload,
                 onUnfavorite = onUnfavorite,
                 onLoadMore = onLoadMoreFavorites,
+            )
+
+            else -> BookmarksTab(
+                state = state,
+                bottomInset = bottomInset,
+                filter = filtered,
+                onPlay = onPlay,
+                onRemoveBookmark = onRemoveBookmark,
             )
         }
     }
@@ -150,7 +155,6 @@ private fun UpdatesTab(
     filter: (String) -> Boolean,
     onOpenAlbum: (String) -> Unit,
     onPlay: (Track, Long) -> Unit,
-    onDownload: (Track) -> Unit,
     onLoadMore: () -> Unit,
 ) {
     val visible = state.updates.filter { filter("${it.track.title} ${it.track.album} ${it.track.artist}") }
@@ -188,7 +192,6 @@ private fun UpdatesTab(
                 track = item.track,
                 positionMs = 0,
                 onPlay = { onPlay(item.track, 0) },
-                onDownload = { onDownload(item.track) },
                 onOpenAlbum = onOpenAlbum,
             )
         })
@@ -257,7 +260,6 @@ private fun FavoritesTab(
     filter: (String) -> Boolean,
     onOpenAlbum: (String) -> Unit,
     onPlay: (Track, Long) -> Unit,
-    onDownload: (Track) -> Unit,
     onUnfavorite: (Track) -> Unit,
     onLoadMore: () -> Unit,
 ) {
@@ -271,7 +273,6 @@ private fun FavoritesTab(
                 track = track,
                 positionMs = 0,
                 onPlay = { onPlay(track, 0) },
-                onDownload = { onDownload(track) },
                 onOpenAlbum = onOpenAlbum,
                 onRemove = { onUnfavorite(track) },
             )
@@ -284,6 +285,57 @@ private fun FavoritesTab(
                 Empty("暂无收藏")
             }
         }
+    }
+}
+
+@Composable
+private fun BookmarksTab(
+    state: UiState,
+    bottomInset: Dp,
+    filter: (String) -> Boolean,
+    onPlay: (Track, Long) -> Unit,
+    onRemoveBookmark: (String) -> Unit,
+) {
+    val rows = state.bookmarks.filter { filter("${it.track.title} ${it.track.album}") }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = bottomInset),
+    ) {
+        items(rows, key = { it.track.id }) { bookmark ->
+            ListItem(
+                headlineContent = {
+                    Text(
+                        bookmark.track.title.ifEmpty { bookmark.track.number },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        listOfNotNull(
+                            bookmark.track.album.takeIf { it.isNotEmpty() },
+                            "书签 ${formatDuration(bookmark.positionMs / 1000.0)}",
+                        ).joinToString(" · "),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                leadingContent = { Cover(bookmark.track.coverUrl, 48) },
+                trailingContent = {
+                    Row {
+                        TextButton(onClick = { onPlay(bookmark.track, bookmark.positionMs) }) {
+                            Text("续播")
+                        }
+                        TextButton(onClick = { onRemoveBookmark(bookmark.track.id) }) {
+                            Text("删除")
+                        }
+                    }
+                },
+                modifier = Modifier.clickable { onPlay(bookmark.track, bookmark.positionMs) },
+            )
+            HorizontalDivider()
+        }
+        if (rows.isEmpty()) item { Empty("暂无书签") }
     }
 }
 
@@ -327,7 +379,6 @@ private fun TrackLine(
     track: Track,
     positionMs: Long,
     onPlay: () -> Unit,
-    onDownload: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     onRemove: (() -> Unit)? = null,
 ) {
@@ -346,14 +397,7 @@ private fun TrackLine(
             )
         },
         leadingContent = { Cover(track.coverUrl, 48) },
-        trailingContent = {
-            Row {
-                IconButton(onClick = onDownload) {
-                    Icon(Icons.Filled.Download, contentDescription = "下载")
-                }
-                TextButton(onClick = onPlay) { Text("播放") }
-            }
-        },
+        trailingContent = { TextButton(onClick = onPlay) { Text("播放") } },
         modifier = Modifier.clickable {
             if (track.albumKey.isNotEmpty()) onOpenAlbum(track.albumKey) else Unit
         },

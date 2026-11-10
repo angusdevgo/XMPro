@@ -1,6 +1,9 @@
 package teikengstudio.xmpro.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,11 +11,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -27,9 +42,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
@@ -39,6 +56,12 @@ import java.util.Date
 import java.util.Locale
 import teikengstudio.xmpro.data.AccountSummary
 
+private enum class SettingsPage { Root, Account, Appearance, About }
+
+/**
+ * Grouped settings: a menu root with one page per topic, mirroring the
+ * previous client's information architecture instead of one long scroll.
+ */
 @Composable
 fun SettingsScreen(
     state: UiState,
@@ -57,30 +80,233 @@ fun SettingsScreen(
     onAutoClaim: (Boolean) -> Unit,
     smsLogin: SmsLoginCallbacks,
 ) {
+    var page by remember { mutableStateOf(SettingsPage.Root) }
     var showCookie by remember { mutableStateOf(false) }
     var showSms by remember { mutableStateOf(false) }
+    val current = state.accounts.firstOrNull { it.active }
+        ?: state.accounts.firstOrNull { it.primary }
+        ?: state.accounts.firstOrNull()
 
+    Column(Modifier.fillMaxSize()) {
+        when (page) {
+            SettingsPage.Root -> SettingsRoot(
+                state = state,
+                current = current,
+                themeMode = themeMode,
+                bottomInset = bottomInset,
+                onNavigate = { page = it },
+            )
+
+            SettingsPage.Account -> {
+                PageHeader("账号", onBack = { page = SettingsPage.Root })
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    AccountContent(
+                        state = state,
+                        current = current,
+                        onSignOut = onSignOut,
+                        onSetPrimary = onSetPrimary,
+                        onRemoveAccount = onRemoveAccount,
+                        onQueryQuota = onQueryQuota,
+                        onClaimOnce = onClaimOnce,
+                        onResumeRewards = onResumeRewards,
+                        onAutoClaim = onAutoClaim,
+                        onAddCookie = { showCookie = true },
+                        onAddSms = { showSms = true },
+                    )
+                    Spacer(Modifier.height(bottomInset))
+                }
+            }
+
+            SettingsPage.Appearance -> {
+                PageHeader("外观", onBack = { page = SettingsPage.Root })
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    ListItem(
+                        headlineContent = { Text("主题") },
+                        supportingContent = { Text(themeLabel(themeMode)) },
+                        trailingContent = {
+                            Row {
+                                for (mode in listOf("system", "light", "dark")) {
+                                    TextButton(onClick = { onThemeMode(mode) }) {
+                                        Text(if (themeMode == mode) "● ${themeLabel(mode)}" else themeLabel(mode))
+                                    }
+                                }
+                            }
+                        },
+                    )
+                    HorizontalDivider()
+                    ListItem(
+                        headlineContent = { Text("OLED 纯黑") },
+                        supportingContent = { Text("暗色模式下使用纯黑背景") },
+                        trailingContent = { Switch(checked = oledBlack, onCheckedChange = onOledBlack) },
+                    )
+                    Spacer(Modifier.height(bottomInset))
+                }
+            }
+
+            SettingsPage.About -> {
+                PageHeader("关于", onBack = { page = SettingsPage.Root })
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    ListItem(
+                        headlineContent = { Text("XMPro") },
+                        supportingContent = { Text("喜马拉雅第三方客户端 · Kotlin + Compose 重构版") },
+                    )
+                    HorizontalDivider()
+                    ListItem(
+                        headlineContent = { Text("数据目录") },
+                        supportingContent = { Text("应用专属外部存储，卸载后一并删除") },
+                    )
+                    ListItem(
+                        headlineContent = { Text("许可") },
+                        supportingContent = { Text("AGPL-3.0-or-later；界面参考 PiliPlus（GPL-3.0）") },
+                    )
+                    Spacer(Modifier.height(bottomInset))
+                }
+            }
+        }
+    }
+
+    if (showCookie) {
+        CookieDialog(
+            onDismiss = { showCookie = false },
+            onConfirm = {
+                onSignIn(it)
+                showCookie = false
+                page = SettingsPage.Account
+            },
+        )
+    }
+    if (showSms) {
+        SmsLoginDialog(
+            callbacks = smsLogin,
+            signedIn = state.signedIn,
+            onDismiss = { showSms = false },
+            onSignedIn = {
+                showSms = false
+                page = SettingsPage.Account
+            },
+        )
+    }
+}
+
+@Composable
+private fun SettingsRoot(
+    state: UiState,
+    current: AccountSummary?,
+    themeMode: String,
+    bottomInset: Dp,
+    onNavigate: (SettingsPage) -> Unit,
+) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        SectionTitle("账号")
+        Text(
+            "设置",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp),
+        )
+        SettingsRow(
+            title = "账号",
+            subtitle = current?.let { "账号 ${it.uid}${if (it.primary) " · 主账号" else ""}" } ?: "未登录",
+            icon = Icons.Filled.Person,
+            onClick = { onNavigate(SettingsPage.Account) },
+        )
+        SettingsRow(
+            title = "外观",
+            subtitle = themeLabel(themeMode),
+            icon = Icons.Filled.Palette,
+            onClick = { onNavigate(SettingsPage.Appearance) },
+        )
+        SettingsRow(
+            title = "关于",
+            subtitle = "版本信息与许可",
+            icon = Icons.Filled.Info,
+            onClick = { onNavigate(SettingsPage.About) },
+        )
+        Spacer(Modifier.height(bottomInset))
+    }
+}
+
+@Composable
+private fun SettingsRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
+        supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall) },
+        leadingContent = {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
+        trailingContent = {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    )
+}
+
+@Composable
+private fun PageHeader(title: String, onBack: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 4.dp, top = 6.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+        }
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun AccountContent(
+    state: UiState,
+    current: AccountSummary?,
+    onSignOut: () -> Unit,
+    onSetPrimary: (String) -> Unit,
+    onRemoveAccount: (String) -> Unit,
+    onQueryQuota: (String) -> Unit,
+    onClaimOnce: (String) -> Unit,
+    onResumeRewards: (String) -> Unit,
+    onAutoClaim: (Boolean) -> Unit,
+    onAddCookie: () -> Unit,
+    onAddSms: () -> Unit,
+) {
+    if (current == null) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Button(onClick = { showCookie = true }, modifier = Modifier.weight(1f)) {
-                Text("Cookie 导入")
-            }
-            OutlinedButton(onClick = { showSms = true }, modifier = Modifier.weight(1f)) {
-                Text("手机号登录")
-            }
+            Button(onClick = onAddCookie, modifier = Modifier.weight(1f)) { Text("Cookie 登录") }
+            OutlinedButton(onClick = onAddSms, modifier = Modifier.weight(1f)) { Text("短信登录") }
         }
-        Spacer(Modifier.height(8.dp))
-        if (state.accounts.isEmpty()) {
-            ListItem(
-                headlineContent = { Text("未登录") },
-                supportingContent = { Text("导入极速版 Cookie，或用手机号短信登录") },
-            )
-        }
-        for (account in state.accounts) {
+        Text(
+            "主账号用于默认请求。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, top = 8.dp),
+        )
+        ListItem(
+            headlineContent = { Text("还没有登录账号。") },
+            supportingContent = { Text("导入极速版 Cookie，或用手机号短信登录") },
+        )
+        return
+    }
+    ProfileCard(
+        account = current,
+        state = state,
+        busy = state.accountBusy,
+        onQueryQuota = onQueryQuota,
+        onClaim = onClaimOnce,
+        onResume = onResumeRewards,
+    )
+    if (state.accounts.size > 1) {
+        SectionTitle("其他账号")
+        for (account in state.accounts.filter { it.identity != current.identity }) {
             AccountCard(
                 account = account,
                 busy = state.accountBusy,
@@ -91,74 +317,140 @@ fun SettingsScreen(
                 onResume = onResumeRewards,
             )
         }
-        if (state.signedIn) {
-            ListItem(
-                headlineContent = { Text("退出当前账号") },
-                supportingContent = { Text("仅清除当前设备上的登录信息") },
-                trailingContent = { TextButton(onClick = onSignOut) { Text("退出") } },
-            )
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(
+            onClick = onAddCookie,
+            modifier = Modifier.weight(1f),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        ) {
+            Text("添加 Cookie 账号", maxLines = 1, style = MaterialTheme.typography.labelMedium)
         }
-        HorizontalDivider()
-        SectionTitle("听时")
-        ListItem(
-            headlineContent = { Text("自动领取听时") },
-            supportingContent = { Text("可用听时不足 2 小时时尝试领取至 4 小时；失败会自动暂停该账号领取") },
-            trailingContent = {
-                Switch(
-                    checked = state.autoClaim,
-                    enabled = !state.accountBusy,
-                    onCheckedChange = onAutoClaim,
-                )
-            },
-        )
-        HorizontalDivider()
-        SectionTitle("外观")
-        ListItem(
-            headlineContent = { Text("主题") },
-            supportingContent = { Text(themeLabel(themeMode)) },
-            trailingContent = {
-                Row {
-                    for (mode in listOf("system", "light", "dark")) {
-                        TextButton(onClick = { onThemeMode(mode) }) {
-                            Text(if (themeMode == mode) "● ${themeLabel(mode)}" else themeLabel(mode))
+        OutlinedButton(
+            onClick = onAddSms,
+            modifier = Modifier.weight(1f),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        ) {
+            Text("短信登录新账号", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+    ListItem(
+        headlineContent = { Text("退出当前账号") },
+        supportingContent = { Text("仅清除当前设备上的登录信息") },
+        trailingContent = { TextButton(onClick = onSignOut) { Text("退出") } },
+    )
+    HorizontalDivider()
+    SectionTitle("听时")
+    ListItem(
+        headlineContent = { Text("自动领取听时") },
+        supportingContent = { Text("不足 2 小时补充至 4 小时，对所有账号生效；失败会暂停该账号领取") },
+        trailingContent = {
+            Switch(
+                checked = state.autoClaim,
+                enabled = !state.accountBusy,
+                onCheckedChange = onAutoClaim,
+            )
+        },
+    )
+}
+
+@Composable
+private fun ProfileCard(
+    account: AccountSummary,
+    state: UiState,
+    busy: Boolean,
+    onQueryQuota: (String) -> Unit,
+    onClaim: (String) -> Unit,
+    onResume: (String) -> Unit,
+) {
+    val balance = account.balance
+    OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        account.uid.take(1).ifEmpty { "我" },
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("账号 ${account.uid}", style = MaterialTheme.typography.titleMedium)
+                        if (account.primary) {
+                            Text(
+                                "  主账号",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
+                    Text(
+                        "设备 ${account.deviceHint}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-            },
-        )
-        ListItem(
-            headlineContent = { Text("OLED 纯黑") },
-            supportingContent = { Text("暗色模式下使用纯黑背景") },
-            trailingContent = { Switch(checked = oledBlack, onCheckedChange = onOledBlack) },
-        )
-        HorizontalDivider()
-        SectionTitle("关于")
-        ListItem(
-            headlineContent = { Text("XMPro") },
-            supportingContent = { Text("喜马拉雅第三方客户端 · Kotlin + Compose 重构版") },
-        )
-        ListItem(
-            headlineContent = { Text("许可") },
-            supportingContent = { Text("AGPL-3.0-or-later；界面参考 PiliPlus（GPL-3.0）") },
-        )
-        Spacer(Modifier.height(bottomInset))
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                Stat(
+                    value = if (balance == null) "未核验" else formatListeningTime(balance.remainingSeconds),
+                    label = "可用听时",
+                    modifier = Modifier.weight(1f),
+                )
+                Stat("${state.subscriptions.size}", "订阅", Modifier.weight(1f))
+                Stat("${state.favorites.size}", "收藏", Modifier.weight(1f))
+            }
+            if (balance != null) {
+                Text(
+                    "核验于 ${SimpleDateFormat("M-d HH:mm", Locale.CHINA).format(Date(balance.checkedAt.toEpochMilli()))}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (account.quotaRejected) {
+                Text(
+                    "听时核验被服务端拒绝，可点「查询听时」重试",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                TextButton(onClick = { onQueryQuota(account.identity) }, enabled = !busy) {
+                    Text("查询听时")
+                }
+                TextButton(onClick = { onClaim(account.identity) }, enabled = !busy && !account.paused) {
+                    Text("领取一次")
+                }
+                if (account.paused) {
+                    TextButton(onClick = { onResume(account.identity) }, enabled = !busy) {
+                        Text("恢复自动领取")
+                    }
+                }
+            }
+        }
     }
+}
 
-    if (showCookie) {
-        CookieDialog(
-            onDismiss = { showCookie = false },
-            onConfirm = {
-                onSignIn(it)
-                showCookie = false
-            },
-        )
-    }
-    if (showSms) {
-        SmsLoginDialog(
-            callbacks = smsLogin,
-            signedIn = state.signedIn,
-            onDismiss = { showSms = false },
-            onSignedIn = { showSms = false },
+@Composable
+private fun Stat(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -192,28 +484,10 @@ private fun AccountCard(
             )
             val balance = account.balance
             Text(
-                if (balance == null) {
-                    "可用听时：未核验"
-                } else {
-                    "可用听时：${balance.remainingSeconds / 3600} 小时 " +
-                        "${(balance.remainingSeconds % 3600) / 60} 分 ${balance.remainingSeconds % 60} 秒"
-                },
+                if (balance == null) "可用听时：未核验" else "可用听时：${formatListeningTime(balance.remainingSeconds)}",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 4.dp),
             )
-            if (balance != null) {
-                Text(
-                    "核验于 ${SimpleDateFormat("M-d HH:mm", Locale.CHINA).format(Date(balance.checkedAt.toEpochMilli()))}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else if (account.quotaRejected) {
-                Text(
-                    "听时核验被服务端拒绝，可点「查询听时」重试；播放与下载仍会校验余额。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             if (account.paused) {
                 Text(
                     "领取已暂停，请先在官方 App 核对上一次结果。",
@@ -412,7 +686,6 @@ private fun SmsLoginDialog(
         )
     }
 
-    // The view model owns the network call and flips `signedIn` on success.
     LaunchedEffect(signedIn) {
         if (signedIn) onSignedIn()
     }

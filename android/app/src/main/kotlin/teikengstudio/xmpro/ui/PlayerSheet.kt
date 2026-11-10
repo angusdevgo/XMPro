@@ -76,6 +76,8 @@ fun PlayerSheet(
     onSeek: (Long) -> Unit,
     onCycleSpeed: () -> Unit,
     onFavorite: () -> Unit,
+    onBookmark: () -> Unit,
+    isFavorite: Boolean,
     onSleepTimer: (Int?) -> Unit,
     onSelectQueue: (Int) -> Unit,
 ) {
@@ -167,10 +169,14 @@ fun PlayerSheet(
                     Text("%.2f×".format(state.speed).replace(".00", ".0").replace(".50", ".5"))
                 }
                 IconButton(onClick = onFavorite, enabled = track != null) {
-                    Icon(Icons.Filled.FavoriteBorder, contentDescription = "收藏")
+                    Icon(
+                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = if (isFavorite) "取消收藏" else "收藏",
+                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                IconButton(onClick = onFavorite, enabled = false) {
-                    Icon(Icons.Filled.BookmarkBorder, contentDescription = "书签")
+                IconButton(onClick = onBookmark, enabled = track != null) {
+                    Icon(Icons.Filled.BookmarkBorder, contentDescription = "保存书签")
                 }
             }
 
