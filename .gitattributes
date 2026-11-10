@@ -1,0 +1,5 @@
+# Hash-locked native sources/notices must retain the exact collected bytes.
+licenses/** -text
+# The native build receipt compares these inputs across checkouts.
+tool/*.sh text eol=lf
+tool/media_sources.json text eol=lf

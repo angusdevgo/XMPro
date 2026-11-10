@@ -1,0 +1,153 @@
+Ximalaya reusable component, exported from XIAOYA Nano
+Copyright (c) 2026 XIAOYA Nano contributors
+
+This component as a whole is distributed under GNU AGPL version 3 or later
+(SPDX: AGPL-3.0-or-later). See LICENSE. No warranty is provided.
+
+Reused SMS login code and algorithms
+-----------------------------------
+Ximalaya-Downloader-Next, by sld272 and its contributors
+https://github.com/sld272/Ximalaya-Downloader-Next
+Revision: 765bae5cc07aaffa41797de2d3a9c963f1deb3e9
+License: AGPL-3.0-or-later
+
+Sources adapted:
+- src/xdl/adapters/apk/client.py: nonce, SMS send/verify and quick login
+- src/xdl/adapters/apk/native_py.py: login SHA-1 signature and RSA encryption
+- src/xdl/config/apk.py: login protocol constants
+- src/xdl/frontends/web_static/app.js: GeeTest/SMS integration
+
+The earlier standalone export was xmly/login.py; its implementation is now
+adapted into lib/api/xmly_login.dart and lib/pages/geetest_dialog.dart.
+The original Nano WebUI is not included. The 2026-11-03/04 export adaptations
+used bounded temporary sessions and caller-owned validation/settlement;
+the Flutter migration retains these protections. Old Python sources were
+removed after cutover. Upstream author notices are retained, and no upstream
+download backend is incorporated.
+
+Network service operators must provide users the Corresponding Source of the
+version they run, including their modifications, under AGPL section 13.
+The host application is responsible for offering that source to its users.
+
+Earlier MIT-licensed project code retains this original notice:
+------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 XIAOYA Nano contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+PiliPlus Flutter interface
+-------------------------
+PiliPlus contributors
+https://github.com/bggRGjQaUbCoE/PiliPlus
+Revision: d9e9626f1a3f89cd9ca85e18f61aaba02634e12a
+License: GNU General Public License version 3; see licenses/PiliPlus-LICENSE.txt.
+
+Sources adapted for XMPlus on 2026-11-04:
+- lib/main.dart: application, localization and theme assembly
+- lib/utils/theme_utils.dart: Material component themes
+- lib/common/widgets/scroll_behavior.dart: desktop scrolling behavior
+- lib/pages/main/view.dart: Material navigation rail and navigation bar
+- lib/pages/setting/view.dart: wide/narrow settings layout
+- lib/utils/config_archive.dart: split-file backup ZIP metadata structure
+- lib/pages/login/geetest/geetest_webview_dialog.dart: WebView interaction pattern
+- lib/utils/update.dart and lib/pages/about/view.dart: release check, update dialog
+  and platform-specific download selection, adapted to XMPlus GitHub releases
+- .github/workflows/build.yml: Android split-ABI signing and release workflow pattern
+
+The desktop runner and its build rules have been removed; only the Android host
+is built. The application keeps an original white artistic X on a bright red
+circle. PiliPlus app-link forwarding and branding are not included. No PiliPlus
+icon, installer or packaging files are incorporated.
+The interface is adapted for audio navigation without Bilibili services.
+This notice does not replace the existing component's AGPL license or the
+upstream GPL obligations. Distribution must retain the applicable licenses
+and provide the Corresponding Source, including these modifications.
+
+Native media and build materials
+--------------------------------
+- Android FFmpeg/FFprobe: FFmpeg 9.0.2 and LAME 3.100, source-built for API 24 in
+  the arm64-v8a ABI with Android NDK 28.2.13676358. The installed executables are LGPL
+  builds, separate processes rather than application-linked FFmpeg libraries.
+  Exact source archives, hashes and licenses are in licenses/media/ and
+  tool/media_sources.json; the recipe is tool/build_android_media.sh.
+  Android system libc, libm, libdl and libz are supplied by the operating system.
+  This software is based in part on the work of the Independent JPEG Group.
+- media_kit wrappers remain MIT; that does not relicense their native libraries.
+  Per-component licenses and notices accompany the native supply, separately
+  from the application license. No downstream media-library patches are used.
+- Only the Android application is built and distributed. No desktop runtime,
+  Windows native supply, or Microsoft CRT redistribution applies.
+
+Public binary distribution requires applicable corresponding-source access.
+
+
+Search endpoint documentation consulted:
+- qilishidai/ximalaya-API, Search_API.md at revision
+  a70cc92862f87cd8c69c580b2e44238105b7248f:
+  https://github.com/qilishidai/ximalaya-API/blob/a70cc92862f87cd8c69c580b2e44238105b7248f/Search_API.md
+- The documentation is licensed CC BY-NC 4.0:
+  https://creativecommons.org/licenses/by-nc/4.0/
+  It is not copied into this application; request/response handling is independently
+  implemented against the live official ximalaya.com endpoint. No endorsement is implied.
+
+Android native audio source and license materials
+------------------------------------------------
+media_kit_libs_android_audio 1.3.8 is an MIT-licensed wrapper; its license does
+not relicense bundled native libraries as MIT. Its pubspec.lock SHA256 is
+8f8f9759e537e12d66f08bc4d5279eb1bb21a0ccc519ff3442c68a9f3b6dd68b;
+the collected pub.dev source archive matches this value.
+
+The wrapper selects the default native artifacts from
+media-kit/libmpv-android-audio-build v1.1.8. Original build recipe revision:
+87744be8b337c50ed54961249b7a97c5e8cc37c9
+https://github.com/media-kit/libmpv-android-audio-build/tree/87744be8b337c50ed54961249b7a97c5e8cc37c9
+The unmodified recipe archive retains dependency versions, exact configuration
+scripts and the original mpv/FFmpeg patches. Its declared components are:
+- mpv 0.35.1: --enable-lgpl; LGPL-2.1-or-later mode, with upstream GPL and
+  permissive source-file notices retained. Linked library licenses also apply.
+- FFmpeg 6.0 / n6.0: --disable-gpl --disable-nonfree --enable-version3;
+  LGPL-3.0-or-later configured static dependency.
+  This software is based in part on the work of the Independent JPEG Group.
+- Mbed TLS 3.6.1: Apache-2.0 OR GPL-2.0-or-later; the Apache-2.0 option is
+  compatible with the configured LGPLv3 FFmpeg mode. Its pinned framework
+  submodule source is also preserved.
+- libxml2 2.10.3: MIT and ISC-style/per-file copyright variants.
+
+Full native license texts, component copyrights and exact source/recipe URLs
+are in licenses/android/THIRD-PARTY-NOTICES.txt, intended for display in the
+Android APK. Individual upstream texts and provenance are preserved under
+licenses/android/licenses/. Source archives and source acquisition details
+are indexed with SHA256 in licenses/android/SOURCES.json. FFmpeg n6.0 reuses
+licenses/native/sources/FFmpeg-ea3d24bbe3c58b171e55fe2151fc7ffaca3ab3d2.tar.gz
+instead of duplicating it. Sources are development/release-source materials,
+not runtime assets. Obtain the matching application source/release from
+https://github.com/angusdevgo/XMPro and retain these materials and all
+applicable notices when redistributing; LGPL/GPL source and modification /
+relinking rights are not replaced by the wrapper license or this summary.
+
+This collection is not a claim of a complete audited native-binary dependency
+closure, a verified binary/source identity, or a reproduced upstream release.
+The original recipe fetches media-kit-android-helper from floating main and
+gas-preprocessor from floating master. Their exact historical release inputs
+are not specified by the tag; collected current immutable snapshots are
+explicitly labelled as such. Build-tool inputs are not a fully pinned closure.
+The original v1.1.8 recipe and component source versions remain available;
+precise collected and uncollected input URLs and limitations are in SOURCES.json.
