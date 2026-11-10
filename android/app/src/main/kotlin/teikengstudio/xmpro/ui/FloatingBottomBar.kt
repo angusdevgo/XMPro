@@ -61,8 +61,9 @@ fun FloatingBottomBar(
     selectedIndex: Int,
     onItemSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f),
-    indicatorColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+    /** null draws no backplate: the bar floats directly over the content. */
+    containerColor: Color? = null,
+    indicatorColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
@@ -89,13 +90,20 @@ fun FloatingBottomBar(
         Box(
             modifier = Modifier
                 .height(64.dp)
-                .shadow(elevation = 8.dp, shape = CircleShape, clip = false)
-                .clip(CircleShape)
-                .background(containerColor)
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                    shape = CircleShape,
+                .then(
+                    if (containerColor == null) {
+                        Modifier
+                    } else {
+                        Modifier
+                            .shadow(elevation = 8.dp, shape = CircleShape, clip = false)
+                            .clip(CircleShape)
+                            .background(containerColor)
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                shape = CircleShape,
+                            )
+                    },
                 ),
             contentAlignment = Alignment.CenterStart,
         ) {
