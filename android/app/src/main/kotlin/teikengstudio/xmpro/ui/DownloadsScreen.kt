@@ -31,6 +31,7 @@ import teikengstudio.xmpro.download.DownloadTask
 @Composable
 fun DownloadsScreen(
     state: UiState,
+    bottomInset: androidx.compose.ui.unit.Dp,
     onPlayFile: (File) -> Unit,
     onDelete: (File) -> Unit,
     onRefresh: () -> Unit,
@@ -58,7 +59,10 @@ fun DownloadsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomInset),
+        ) {
             items(active, key = { it.id }) { task ->
                 Column {
                     ListItem(

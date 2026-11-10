@@ -29,6 +29,7 @@ import teikengstudio.xmpro.model.Track
 @Composable
 fun AlbumScreen(
     state: UiState,
+    bottomInset: androidx.compose.ui.unit.Dp,
     onBack: () -> Unit,
     onPlay: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -58,7 +59,10 @@ fun AlbumScreen(
             )
         }
         if (page != null) {
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomInset),
+            ) {
                 items(page.tracks, key = { it.id }) { track ->
                     ListItem(
                         headlineContent = { Text(track.title.ifEmpty { track.number }) },

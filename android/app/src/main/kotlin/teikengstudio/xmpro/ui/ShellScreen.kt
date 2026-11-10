@@ -75,16 +75,18 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
     }
 
     Box(Modifier.fillMaxSize()) {
+        // Content fills the screen and scrolls under the floating bars; each
+        // screen adds `contentBottom` as list padding so the last row clears them.
         Box(
             Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .padding(bottom = contentBottom),
+                .statusBarsPadding(),
         ) {
             when (selected) {
                 Destination.Home -> if (state.album != null || state.albumLoading || state.albumError != null) {
                     AlbumScreen(
                         state = state,
+                        bottomInset = contentBottom,
                         onBack = viewModel::closeAlbum,
                         onPlay = viewModel::play,
                         onDownload = viewModel::download,
@@ -92,6 +94,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                 } else {
                     HomeScreen(
                         state = state,
+                        bottomInset = contentBottom,
                         onSearch = viewModel::search,
                         onOpenAlbum = viewModel::openAlbum,
                         onPlay = viewModel::play,
@@ -112,6 +115,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
 
                 Destination.Downloads -> DownloadsScreen(
                     state = state,
+                    bottomInset = contentBottom,
                     onPlayFile = viewModel::playFile,
                     onDelete = viewModel::deleteDownload,
                     onRefresh = viewModel::refreshDownloads,
@@ -122,6 +126,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
 
                 Destination.Settings -> SettingsScreen(
                     state = state,
+                    bottomInset = contentBottom,
                     themeMode = themeMode,
                     oledBlack = oledBlack,
                     onSignIn = viewModel::signIn,

@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsScreen(
     state: UiState,
+    bottomInset: androidx.compose.ui.unit.Dp,
     themeMode: String,
     oledBlack: Boolean,
     onSignIn: (String) -> Unit,
@@ -86,6 +87,7 @@ fun SettingsScreen(
             headlineContent = { Text("许可") },
             supportingContent = { Text("AGPL-3.0-or-later；界面参考 PiliPlus（GPL-3.0）") },
         )
+        androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = bottomInset))
     }
 
     if (showImport) {

@@ -49,6 +49,7 @@ import teikengstudio.xmpro.model.Track
 @Composable
 fun HomeScreen(
     state: UiState,
+    bottomInset: androidx.compose.ui.unit.Dp,
     onSearch: (String) -> Unit,
     onOpenAlbum: (String) -> Unit,
     onPlay: (Track) -> Unit,
@@ -111,7 +112,10 @@ fun HomeScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomInset),
+        ) {
             if (showingSearch) {
                 items(state.albums, key = { "album-${it.id}" }) { album ->
                     ListItem(
