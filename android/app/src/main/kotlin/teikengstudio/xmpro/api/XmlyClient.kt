@@ -42,6 +42,79 @@ class XmlyClient(
     fun getMobile(path: String, query: Map<String, String> = emptyMap()): JSONObject =
         http.get(mobile, path, query = query)
 
+    fun accountAvailable(): Boolean = credentials != null
+
+    /**
+     * Lite-client request bound to this client's account (or anonymous).
+     *
+     * Writes are never retried by [XmlyHttp], so an unknown outcome surfaces as
+     * `uncertain` instead of being replayed.
+     */
+    fun request(
+        method: String,
+        origin: String,
+        path: String,
+        query: Map<String, String> = emptyMap(),
+        form: Map<String, String>? = null,
+        json: Map<String, Any?>? = null,
+        account: Boolean = true,
+        readOnly: Boolean = true,
+    ): JSONObject {
+        val bound = if (account) credentials else null
+        if (account && bound == null) {
+            throw XmlyException("login_required", "请先登录", definitive = true)
+        }
+        val headers = if (origin == COLLECTOR) {
+            mapOf("User-Agent" to "ting_3.4.10.3(Android,30)", "Accept" to "*/*")
+        } else {
+            emptyMap()
+        }
+        val limit = if (origin == COLLECTOR) 8 * 1024 * 1024 else XmlyHttp.MAX_RESPONSE_BYTES
+        return when {
+            method == "GET" -> http.get(
+                origin = origin,
+                path = path,
+                query = query,
+                credentials = bound,
+                readOnly = readOnly,
+                headers = headers,
+                responseLimit = limit,
+            )
+
+            form != null -> http.postForm(
+                origin = origin,
+                path = path,
+                query = query,
+                form = form,
+                credentials = bound,
+                readOnly = readOnly,
+            )
+
+            else -> http.postJson(
+                origin = origin,
+                path = path,
+                query = query,
+                json = json ?: emptyMap(),
+                credentials = bound,
+                readOnly = readOnly,
+            )
+        }
+    }
+
+    /** Account identity fields required by the history signature. */
+    fun context(): Map<String, String> {
+        val account = credentials ?: throw XmlyException("login_required", "历史同步需要登录", definitive = true)
+        return mapOf(
+            "uid" to account.uid,
+            "token" to account.token.substringAfter('&'),
+            "device" to "android",
+            "deviceId" to account.deviceId,
+            "version" to "3.4.10",
+            "channel" to "and-f5",
+            "impl" to "com.ximalaya.ting.lite",
+        )
+    }
+
     // ---------------------------------------------------------------- catalogue
 
     fun search(query: String, kind: String = "track", page: Int = 1, pageSize: Int = 20): SearchPage {
@@ -427,6 +500,8 @@ class XmlyClient(
 
     companion object {
         const val MOBILE = "https://mobile.ximalaya.com"
+        const val COLLECTOR = "https://xdcs-collector.ximalaya.com"
+        const val WELFARE = "https://m.ximalaya.com"
         const val ANONYMOUS = "anonymous"
         val QUALITIES = listOf("m4a_128", "m4a_64", "mp3_64", "mp3_32", "m4a_24")
     }

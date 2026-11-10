@@ -39,6 +39,8 @@ class XmlyHttp(
         credentials: Credentials? = null,
         signed: Boolean = false,
         readOnly: Boolean = true,
+        headers: Map<String, String> = emptyMap(),
+        responseLimit: Int = MAX_RESPONSE_BYTES,
     ): JSONObject = execute(
         method = "GET",
         origin = origin,
@@ -49,7 +51,8 @@ class XmlyHttp(
         credentials = credentials,
         signed = signed,
         readOnly = readOnly,
-        responseLimit = MAX_RESPONSE_BYTES,
+        responseLimit = responseLimit,
+        headers = headers,
     )
 
     fun postJson(
@@ -72,6 +75,7 @@ class XmlyHttp(
         signed = signed,
         readOnly = readOnly,
         responseLimit = responseLimit,
+        headers = emptyMap(),
     )
 
     fun postForm(
@@ -96,6 +100,7 @@ class XmlyHttp(
         signed = signed,
         readOnly = readOnly,
         responseLimit = responseLimit,
+        headers = emptyMap(),
     )
 
     private fun execute(
@@ -109,6 +114,7 @@ class XmlyHttp(
         signed: Boolean,
         readOnly: Boolean,
         responseLimit: Int,
+        headers: Map<String, String>,
     ): JSONObject {
         if (signed && credentials == null) {
             throw XmlyException("login_required", "签名请求需要登录", definitive = true)
@@ -117,7 +123,7 @@ class XmlyHttp(
         for (attempt in 0 until MAX_ATTEMPTS) {
             awaitCooldown(origin)
             try {
-                val outcome = send(method, origin, path, query, body, form, credentials, signed, responseLimit)
+                val outcome = send(method, origin, path, query, body, form, credentials, signed, responseLimit, headers)
                 return interpret(outcome, origin, credentials != null, retryAfter(outcome.retryAfter))
             } catch (retry: Retryable) {
                 if (!readOnly || attempt == MAX_ATTEMPTS - 1) {
@@ -152,6 +158,7 @@ class XmlyHttp(
         credentials: Credentials?,
         signed: Boolean,
         responseLimit: Int,
+        headers: Map<String, String>,
     ): Outcome {
         val url: HttpUrl = (origin + path).toHttpUrl().newBuilder().apply {
             query.forEach { (key, value) -> addQueryParameter(key, value) }
@@ -160,6 +167,7 @@ class XmlyHttp(
             .url(url)
             .header("Accept", "application/json")
             .header("Connection", "close")
+        headers.forEach { (key, value) -> builder.header(key, value) }
         credentials?.let { builder.header("Cookie", it.cookie) }
         if (signed) {
             val required = credentials ?: throw XmlyException("login_required", "签名请求需要登录", definitive = true)

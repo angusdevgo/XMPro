@@ -24,3 +24,40 @@ class HomeContent(
     val sections: List<HomeSection>,
     val tabs: List<HomeTab> = emptyList(),
 )
+
+/** One subscribed album plus its newest episode and unread count. */
+class SubscriptionItem(
+    val album: Album,
+    val latestTitle: String,
+    val unreadCount: Int,
+    val updatedAt: Long,
+)
+
+class SubscriptionPage(
+    val items: List<SubscriptionItem>,
+    val hasMore: Boolean,
+)
+
+class FavoritePage(
+    val items: List<Track>,
+    val hasMore: Boolean,
+)
+
+/** A newly published episode in the "listening updates" feed. */
+class UpdateItem(
+    val track: Track,
+    val publishedAt: Long,
+)
+
+class UpdatePage(
+    val items: List<UpdateItem>,
+    val hasMore: Boolean,
+    val nextTimeline: Long?,
+)
+
+/** One cloud listening record: where playback stopped for a track. */
+class HistoryRecord(
+    val track: Track,
+    val positionSeconds: Double,
+    val updatedAt: Long,
+)

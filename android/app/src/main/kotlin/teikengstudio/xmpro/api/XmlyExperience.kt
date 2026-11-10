@@ -3,21 +3,28 @@ package teikengstudio.xmpro.api
 import org.json.JSONArray
 import org.json.JSONObject
 import teikengstudio.xmpro.model.Album
+import teikengstudio.xmpro.model.FavoritePage
 import teikengstudio.xmpro.model.HomeAlbumStats
 import teikengstudio.xmpro.model.HomeChannel
 import teikengstudio.xmpro.model.HomeContent
 import teikengstudio.xmpro.model.HomeSection
 import teikengstudio.xmpro.model.HomeTab
+import teikengstudio.xmpro.model.SubscriptionItem
+import teikengstudio.xmpro.model.SubscriptionPage
+import teikengstudio.xmpro.model.Track
+import teikengstudio.xmpro.model.UpdateItem
+import teikengstudio.xmpro.model.UpdatePage
 import teikengstudio.xmpro.model.XmlyException
 import teikengstudio.xmpro.model.coverUrl
 import teikengstudio.xmpro.model.publicRaw
 import teikengstudio.xmpro.model.xmlyIdentifier
 
 /**
- * Lite-client home surfaces (channels, module feeds, rankings).
+ * Lite-client home and library surfaces (channels, module feeds, subscriptions,
+ * favourites, updates).
  *
- * These endpoints are public, so the home screen works before an account is
- * imported; only subscription/favourite mutations need authentication.
+ * Home endpoints are public; once an account is imported the same calls carry
+ * its cookie so the returned feed is personalised.
  */
 class XmlyExperience(private val client: XmlyClient) {
     private val invalid = XmlyException("invalid_home", "首页数据无效", definitive = true)
@@ -129,9 +136,211 @@ class XmlyExperience(private val client: XmlyClient) {
         )
     }
 
+    private fun subscriptionAlbum(row: JSONObject): Album {
+        val albumId = text(row.opt("albumId"))
+        if (albumId.isEmpty()) throw invalid
+        val map = mapOf(
+            "albumTitle" to text(row.opt("albumTitle")),
+            "albumIntro" to text(row.opt("albumIntro")),
+            "nickname" to text(row.opt("nickname")),
+            "coverLarge" to text(row.opt("coverLarge")),
+            "coverMiddle" to text(row.opt("coverMiddle")),
+            "coverSmall" to text(row.opt("coverSmall")),
+            "cover_url" to text(row.opt("albumCover")),
+        )
+        val plain = map.toPlainMap()
+        return Album(
+            rawId = xmlyIdentifier(albumId),
+            title = (plain["albumTitle"] ?: "").toString(),
+            artist = (plain["nickname"] ?: "").toString(),
+            intro = (plain["albumIntro"] ?: "").toString(),
+            coverUrl = coverUrl(plain),
+            total = integer(row.opt("trackCount")) ?: 0,
+            raw = publicRaw(plain),
+        )
+    }
+
+    private fun track(row: JSONObject): Track {
+        val id = text(row.opt("trackId")).ifEmpty { text(row.opt("id")) }
+        if (id.isEmpty()) throw invalid
+        val albumId = text(row.opt("albumId")).ifEmpty { text(row.opt("album_id")) }
+        val map = mapOf(
+            "trackId" to id,
+            "title" to text(row.opt("title")),
+            "nickname" to text(row.opt("nickname")),
+            "albumTitle" to text(row.opt("albumTitle")),
+            "albumId" to albumId,
+            "coverLarge" to text(row.opt("coverLarge")),
+            "coverMiddle" to text(row.opt("coverMiddle")),
+            "coverSmall" to text(row.opt("coverSmall")),
+            "cover_url" to text(row.opt("cover")),
+        ).toPlainMap()
+        val duration = when (val raw = row.opt("duration")) {
+            is Number -> raw.toDouble()
+            is String -> raw.toDoubleOrNull() ?: 0.0
+            else -> 0.0
+        }
+        return Track(
+            rawId = id,
+            title = (map["title"] ?: "").toString(),
+            artist = (map["nickname"] ?: "").toString(),
+            album = (map["albumTitle"] ?: "").toString(),
+            albumId = albumId,
+            duration = duration,
+            isPaid = row.opt("isPaid") as? Boolean ?: row.opt("paid") as? Boolean,
+            isAuthorized = row.opt("isAuthorized") as? Boolean ?: row.opt("authorized") as? Boolean,
+            coverUrl = coverUrl(map),
+            raw = publicRaw(map),
+        )
+    }
+
+    /** Subscribed albums with unread counts, newest update first. */
+    fun subscriptions(page: Int = 1, pageSize: Int = 30): SubscriptionPage {
+        requireAccount()
+        paging(page, pageSize)
+        val data = get(
+            "/fsubscribe-web/subscribe/comprehensive/rank/${stamp()}",
+            mapOf("pageId" to page.toString(), "sign" to "2", "size" to pageSize.toString()),
+        )
+        val seen = mutableSetOf<String>()
+        val items = rows(data.opt("albumResults")).take(pageSize).map { row ->
+            val album = subscriptionAlbum(row)
+            if (!seen.add(album.id)) {
+                throw XmlyException("repeated_page", "订阅列表重复，请刷新后重试")
+            }
+            SubscriptionItem(
+                album = album,
+                latestTitle = text(row.opt("trackTitle")),
+                unreadCount = integer(row.opt("unreadNum")) ?: throw invalid,
+                updatedAt = time(row.opt("lastUpdateAt") ?: 0),
+            )
+        }
+        val hasMore = more(data)
+        if (hasMore && items.isEmpty()) throw invalid
+        return SubscriptionPage(items, hasMore)
+    }
+
+    /** Favourite tracks, newest first. */
+    fun favorites(page: Int = 1, pageSize: Int = 30): FavoritePage {
+        requireAccount()
+        paging(page, pageSize)
+        val data = get(
+            "/lite-mobile/like/v1/user-likes",
+            mapOf("pageId" to page.toString(), "pageSize" to pageSize.toString()),
+        )
+        val maxPage = integer(data.opt("maxPageId")) ?: throw invalid
+        if (integer(data.opt("pageId")) != page || integer(data.opt("pageSize")) != pageSize) throw invalid
+        val seen = mutableSetOf<String>()
+        val items = rows(data.opt("dataList")).take(pageSize).mapNotNull { row ->
+            if (integer(row.opt("resourceType")) != 1) throw invalid
+            val track = track(row)
+            if (track.albumKey.isEmpty()) throw invalid
+            if (!seen.add(track.id)) {
+                throw XmlyException("repeated_page", "收藏列表重复，请刷新后重试")
+            }
+            track
+        }
+        val hasMore = page < maxPage
+        if ((hasMore && items.isEmpty()) || (items.isNotEmpty() && page > maxPage)) throw invalid
+        return FavoritePage(items, hasMore)
+    }
+
+    /** Newest episodes of subscribed albums; [before] pages backwards. */
+    fun updates(before: Long? = null, pageSize: Int = 30): UpdatePage {
+        requireAccount()
+        paging(1, pageSize)
+        if (before != null && (before <= 0 || before > 2115354119000L)) throw invalid
+        val query = linkedMapOf("sign" to "2", "size" to pageSize.toString())
+        before?.let { query["timeline"] = it.toString() }
+        val data = get("/track-feed/v1/track-feed/dynamic/ts-${stamp()}", query)
+        val seen = mutableSetOf<String>()
+        var cursor: Long? = null
+        val items = rows(data.opt("trackResults")).take(pageSize).map { row ->
+            val track = track(row)
+            if (!seen.add(track.id)) {
+                throw XmlyException("repeated_page", "更新列表重复，请刷新后重试")
+            }
+            val timeline = time(row.opt("timeline"))
+            val previous = cursor
+            if (previous != null && timeline > previous) throw invalid
+            cursor = timeline
+            UpdateItem(track, time(row.opt("createdAt") ?: timeline))
+        }
+        val hasMore = more(data)
+        val next = cursor
+        if (before != null && next != null && next >= before) {
+            throw XmlyException("repeated_page", "暂时无法读取更早的更新，已保留当前列表")
+        }
+        if (hasMore && (next == null || next <= 0)) throw invalid
+        return UpdatePage(items, hasMore, next)
+    }
+
+    fun setSubscribed(albumId: String, subscribed: Boolean) {
+        requireAccount()
+        val id = xmlyIdentifier(albumId)
+        val path = if (subscribed) {
+            "/subscribe/album-subscribe/and/ask-anchor-info"
+        } else {
+            "/subscribe/album/subscribe/delete"
+        }
+        val payload = client.request(
+            "POST",
+            XmlyClient.MOBILE,
+            path,
+            form = mapOf("albumId" to id),
+            readOnly = false,
+        )
+        if (integer(payload.opt("ret")) != 0) throw invalid
+    }
+
+    fun setFavorite(track: Track, favorite: Boolean) {
+        requireAccount()
+        val id = xmlyIdentifier(track.id)
+        var album = track.albumKey
+        if (album.isEmpty()) album = client.track(id).albumKey
+        if (album.isEmpty()) throw XmlyException("missing_album", "缺少专辑标识", definitive = true)
+        val payload = client.request(
+            "POST",
+            XmlyClient.MOBILE,
+            if (favorite) "/lite-mobile/like/v1/like" else "/lite-mobile/like/v1/dislike",
+            form = mapOf("resourceId" to id, "albumId" to album, "resourceType" to "1"),
+            readOnly = false,
+        )
+        if (integer(payload.opt("ret")) != 0) throw invalid
+    }
+
     private fun get(path: String, query: Map<String, String>): JSONObject {
-        val payload = client.getMobile(path, query)
+        val payload = if (client.credentials != null) {
+            client.request("GET", XmlyClient.MOBILE, path, query = query)
+        } else {
+            client.getMobile(path, query)
+        }
         return payload.optJSONObject("data") ?: throw invalid
+    }
+
+    private fun requireAccount() {
+        if (client.credentials == null) {
+            throw XmlyException("login_required", "登录后使用订阅、收藏和更新", definitive = true)
+        }
+    }
+
+    private fun paging(page: Int, size: Int) {
+        if (page < 1 || page > 10000 || size < 1 || size > 50) {
+            throw XmlyException("invalid_page", "页码范围为 1..10000，每页 1..50", definitive = true)
+        }
+    }
+
+    private fun more(data: JSONObject): Boolean =
+        (data.opt("hasMore") as? Boolean) ?: throw invalid
+
+    private fun time(value: Any?): Long {
+        val number = when (value) {
+            is Number -> value.toLong()
+            is String -> value.toLongOrNull()
+            else -> null
+        } ?: throw invalid
+        if (number < 0 || number > 2115354119000L) throw invalid
+        return number
     }
 
     private fun rows(value: Any?): List<JSONObject> {

@@ -17,10 +17,8 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,12 +34,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import teikengstudio.xmpro.data.AppContainer
 
-private enum class Destination(val label: String) {
-    Home("主页"),
-    Listening("听过"),
-    Downloads("下载"),
-    Settings("设置"),
-}
+private enum class Destination { Home, Listening, Downloads, Settings }
 
 private val navItems = listOf(
     FloatingNavItem("主页", Icons.Filled.Home, Icons.Outlined.Home),
@@ -66,6 +59,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
 
     LaunchedEffect(Unit) {
         if (state.channels.isEmpty()) viewModel.loadHome()
+        viewModel.refreshListening()
     }
 
     LaunchedEffect(state.message) {
@@ -88,30 +82,41 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                         state = state,
                         bottomInset = contentBottom,
                         onBack = viewModel::closeAlbum,
-                        onPlay = viewModel::play,
+                        onPlay = { viewModel.play(it) },
                         onDownload = viewModel::download,
+                        onSubscribe = viewModel::setSubscribed,
+                        onSubscribeAll = { albumId ->
+                            state.album?.tracks?.firstOrNull()?.let(viewModel::download)
+                        },
                     )
                 } else {
                     HomeScreen(
                         state = state,
                         bottomInset = contentBottom,
                         onSearch = viewModel::search,
+                        onClearSearch = viewModel::clearSearch,
+                        onRefreshHome = viewModel::loadHome,
                         onOpenAlbum = viewModel::openAlbum,
-                        onPlay = viewModel::play,
+                        onPlay = { viewModel.play(it) },
                         onDownload = viewModel::download,
                         onSelectChannel = viewModel::selectChannel,
                         onSelectTab = viewModel::selectTab,
                     )
                 }
 
-                Destination.Listening -> Column(Modifier.padding(24.dp)) {
-                    Text("听过", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "听时记录与云进度将在下一阶段接入",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Destination.Listening -> ListeningScreen(
+                    state = state,
+                    bottomInset = contentBottom,
+                    onRefresh = viewModel::refreshListening,
+                    onOpenAlbum = viewModel::openAlbum,
+                    onPlay = { track, positionMs -> viewModel.play(track, positionMs) },
+                    onDownload = viewModel::download,
+                    onUnsubscribe = { viewModel.setSubscribed(it, false) },
+                    onUnfavorite = { viewModel.setFavorite(it, false) },
+                    onLoadMoreUpdates = viewModel::loadMoreUpdates,
+                    onLoadMoreSubscriptions = viewModel::loadMoreSubscriptions,
+                    onLoadMoreFavorites = viewModel::loadMoreFavorites,
+                )
 
                 Destination.Downloads -> DownloadsScreen(
                     state = state,
@@ -136,6 +141,22 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                         viewModel.setThemeMode(it)
                     },
                     onOledBlack = onOledBlackChange,
+                    onSetPrimary = viewModel::setPrimaryAccount,
+                    onRemoveAccount = viewModel::removeAccount,
+                    onQueryQuota = viewModel::queryQuota,
+                    onClaimOnce = viewModel::claimOnce,
+                    onResumeRewards = viewModel::resumeRewards,
+                    onAutoClaim = viewModel::setAutoClaim,
+                    smsLogin = remember(viewModel) {
+                        SmsLoginCallbacks(
+                            captchaId = viewModel.geetestConfig()["captcha_id"] as String,
+                            sendSms = { mobile, fields -> viewModel.sendSms(mobile, fields) },
+                            verifySms = { challenge, code, primary ->
+                                viewModel.verifySms(challenge, code, primary)
+                            },
+                            cancel = viewModel::cancelSmsLogin,
+                        )
+                    },
                 )
             }
         }
