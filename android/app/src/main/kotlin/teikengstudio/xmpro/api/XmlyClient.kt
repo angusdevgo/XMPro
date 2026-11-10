@@ -6,6 +6,7 @@ import org.json.JSONObject
 import teikengstudio.xmpro.data.QuotaSource
 import teikengstudio.xmpro.model.Album
 import teikengstudio.xmpro.model.AlbumPage
+import teikengstudio.xmpro.model.ResolvedAudio
 import teikengstudio.xmpro.model.Credentials
 import teikengstudio.xmpro.model.Quota
 import teikengstudio.xmpro.model.SearchPage
@@ -13,6 +14,7 @@ import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.XMLY_ALBUM_PAGE_SIZE
 import teikengstudio.xmpro.model.XmlyException
 import teikengstudio.xmpro.model.coverUrl
+import teikengstudio.xmpro.model.mediaUri
 import teikengstudio.xmpro.model.publicRaw
 import teikengstudio.xmpro.model.xmlyIdentifier
 import teikengstudio.xmpro.model.xmlyPositive
@@ -168,6 +170,118 @@ class XmlyClient(
         return trackFromApi(map) ?: throw XmlyException("missing_track", "声音信息缺失")
     }
 
+    /**
+     * Resolves the best playable URL for [number].
+     *
+     * Paid tracks are only resolved for a logged-in account with listening time
+     * available; the caller must treat `requiresReward` as a billing obligation.
+     */
+    fun resolve(number: String, quality: String = "auto"): ResolvedAudio {
+        val requested = if (quality == "auto") "auto" else quality.lowercase()
+        if (requested != "auto" && requested !in QUALITIES) {
+            throw XmlyException("invalid_quality", "音质设置无效", definitive = true)
+        }
+        val id = xmlyIdentifier(number)
+        var info = trackInfoMap(id)
+        var requiresReward = false
+        if (info["isPaid"] != false && info["isAuthorized"] != true) {
+            val account = credentials
+                ?: throw XmlyException("login_required", "请先导入极速版登录信息", definitive = true)
+            val current = activity("config", null)
+            if (!current.newDevice && current.remainingSeconds <= 0) {
+                throw XmlyException("insufficient_quota", "听时不足，请前往官方 App 获取听时", definitive = true)
+            }
+            requiresReward = true
+            info = trackInfoMap(id, current)
+            if (info["isPaid"] == false || info["isAuthorized"] == true) requiresReward = false
+            if (account.uid.isEmpty()) throw XmlyException("login_required", "请先登录", definitive = true)
+        }
+        if (info["isPreview"] == true || info["isTrial"] == true) {
+            throw XmlyException("preview_only", "仅获得试听音频，不能下载完整声音", definitive = true)
+        }
+        val candidates = LinkedHashMap<String, String>()
+        fun add(type: String, value: Any?, encrypted: Boolean) {
+            val text = value as? String ?: return
+            if (text.isEmpty() || candidates.containsKey(type)) return
+            val decoded = if (encrypted && !text.startsWith("http://") && !text.startsWith("https://")) {
+                XmlyCrypto.decrypt(text, XmlyCrypto.playKey)
+            } else {
+                text
+            }
+            candidates[type] = mediaUri(decoded)
+        }
+        val accountPresent = credentials != null
+        val listOnly = accountPresent
+        if (!listOnly || candidates.isEmpty()) {
+            add("mp3_64", info["playUrl64"], encrypted = true)
+            add("mp3_32", info["playUrl32"], encrypted = true)
+        }
+        if (accountPresent) {
+            val rawList = info["playUrlList"]
+            val list = when (rawList) {
+                null -> null
+                is String -> runCatching { JSONArray(rawList) }.getOrElse {
+                    throw XmlyException("invalid_media", "音频列表格式无效")
+                }
+                is JSONArray -> rawList
+                is List<*> -> JSONArray(rawList.toString())
+                else -> throw XmlyException("invalid_media", "音频列表格式无效")
+            }
+            if (list != null) {
+                for (index in 0 until list.length()) {
+                    val item = list.optJSONObject(index) ?: continue
+                    val type = item.optString("type").lowercase()
+                    if (type !in QUALITIES) continue
+                    add(type, item.opt("url"), encrypted = true)
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            throw XmlyException(
+                "permission_denied",
+                "当前没有获得完整音频地址，请检查听时与版权权限",
+                definitive = true,
+            )
+        }
+        val chosen = if (requested != "auto" && candidates.containsKey(requested)) {
+            requested
+        } else {
+            QUALITIES.first { candidates.containsKey(it) }
+        }
+        val track = trackFromApi(info) ?: throw XmlyException("missing_track", "声音信息缺失")
+        return ResolvedAudio(
+            url = candidates.getValue(chosen),
+            requiresReward = requiresReward,
+            track = track,
+            actualQuality = chosen,
+            accountIdentity = identity,
+        )
+    }
+
+    private fun trackInfoMap(id: String, reward: Quota? = null): Map<String, Any?> {
+        val query = linkedMapOf<String, String>("device" to "android", "trackId" to id)
+        if (reward != null) {
+            query["a1"] = if (reward.newDevice) "1" else reward.remainingSeconds.toString()
+            query["a2"] = clock().toEpochMilli().toString()
+            query["a3"] = "0"
+        }
+        val payload = http.get(
+            mobile,
+            "/fmobile-track/fmobile/track/v2/baseInfo",
+            query = query,
+            credentials = credentials,
+            signed = credentials != null,
+            readOnly = true,
+        )
+        val data = payload.optJSONObject("data") ?: throw XmlyException("missing_track", "声音信息缺失")
+        val map = data.toPlainMap()
+        val returned = (map["trackId"] ?: map["id"] ?: "").toString()
+        if (returned.isNotEmpty() && xmlyIdentifier(returned) != id) {
+            throw XmlyException("id_mismatch", "声音信息不匹配")
+        }
+        return map
+    }
+
     // ------------------------------------------------------------------ billing
 
     override fun quota(identity: String): Quota = activity("config", null)
@@ -294,6 +408,7 @@ class XmlyClient(
     companion object {
         const val MOBILE = "https://mobile.ximalaya.com"
         const val ANONYMOUS = "anonymous"
+        val QUALITIES = listOf("m4a_128", "m4a_64", "mp3_64", "mp3_32", "m4a_24")
     }
 }
 

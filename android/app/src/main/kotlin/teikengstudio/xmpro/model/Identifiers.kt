@@ -28,6 +28,18 @@ fun xmlyPositive(value: Any?): Int? {
     return if (number in 1..Int.MAX_VALUE) number.toInt() else null
 }
 
+/** Accepts only absolute http(s) media URLs without embedded credentials. */
+fun mediaUri(value: String): String {
+    if (value.isEmpty() || value.length > 16384) throw XmlyException("invalid_media", "音频地址无效")
+    if (value.any { it.code <= 0x20 }) throw XmlyException("invalid_media", "音频地址无效")
+    val uri = runCatching { java.net.URI(value) }.getOrNull()
+        ?: throw XmlyException("invalid_media", "音频地址无效")
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "http" && scheme != "https") throw XmlyException("invalid_media", "音频地址无效")
+    if (uri.host.isNullOrEmpty() || uri.userInfo != null) throw XmlyException("invalid_media", "音频地址无效")
+    return value
+}
+
 /** Resolves an album or track cover, upgrading plain xmcdn links to https. */
 fun coverUrl(raw: Map<String, Any?>): String? {
     for (key in COVER_KEYS) {

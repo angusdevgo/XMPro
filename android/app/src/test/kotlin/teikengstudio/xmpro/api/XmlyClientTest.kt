@@ -122,6 +122,73 @@ class XmlyClientTest {
         assertEquals("777", albums.albums.single().id)
     }
 
+
+    @Test
+    fun `resolve prefers the highest available quality`() {
+        val url64 = XmlyCrypto.encrypt("https://audio.xmcdn.com/a64.m4a", XmlyCrypto.playKey).replace("\n", "")
+        val url32 = XmlyCrypto.encrypt("https://audio.xmcdn.com/a32.mp3", XmlyCrypto.playKey).replace("\n", "")
+        server.enqueue(MockResponse().setBody("""
+            {"ret":0,"data":{"trackId":101,"title":"第一集","duration":301,
+             "isPaid":false,"playUrl64":"$url64","playUrl32":"$url32"}}
+        """.trimIndent()))
+        val audio = client().resolve("101")
+        assertEquals("mp3_64", audio.actualQuality)
+        assertEquals("https://audio.xmcdn.com/a64.m4a", audio.url)
+        assertEquals(false, audio.requiresReward)
+        assertEquals("101", audio.track.number)
+    }
+
+    @Test
+    fun `resolve honours an explicit quality and rejects unknown ones`() {
+        val url32 = XmlyCrypto.encrypt("https://audio.xmcdn.com/a32.mp3", XmlyCrypto.playKey).replace("\n", "")
+        server.enqueue(MockResponse().setBody("""
+            {"ret":0,"data":{"trackId":101,"duration":301,"isPaid":false,"playUrl32":"$url32"}}
+        """.trimIndent()))
+        assertEquals("mp3_32", client().resolve("101", quality = "mp3_32").actualQuality)
+        assertEquals(
+            "invalid_quality",
+            assertFailsWith<XmlyException> { client().resolve("101", quality = "wav") }.code,
+        )
+    }
+
+    @Test
+    fun `resolve requires listening time for paid tracks`() {
+        server.enqueue(MockResponse().setBody("""{"ret":0,"data":{"trackId":101,"duration":301,"isPaid":true}}"""))
+        assertEquals(
+            "login_required",
+            assertFailsWith<XmlyException> { client().resolve("101") }.code,
+        )
+
+        // With an account: the quota probe reports zero remaining seconds.
+        server.enqueue(MockResponse().setBody("""{"ret":0,"data":{"trackId":101,"duration":301,"isPaid":true}}"""))
+        server.enqueue(MockResponse().setBody(quotaBody("0", "false")))
+        assertEquals(
+            "insufficient_quota",
+            assertFailsWith<XmlyException> { client(withAccount = true).resolve("101") }.code,
+        )
+    }
+
+    @Test
+    fun `resolve rejects trial only payloads`() {
+        server.enqueue(MockResponse().setBody("""
+            {"ret":0,"data":{"trackId":101,"duration":301,"isPaid":false,"isPreview":true,
+             "playUrl64":"https://audio.xmcdn.com/a.m4a"}}
+        """.trimIndent()))
+        assertEquals(
+            "preview_only",
+            assertFailsWith<XmlyException> { client().resolve("101") }.code,
+        )
+    }
+
+    @Test
+    fun `resolve rejects payloads without any playable url`() {
+        server.enqueue(MockResponse().setBody("""{"ret":0,"data":{"trackId":101,"duration":301,"isPaid":false}}"""))
+        assertEquals(
+            "permission_denied",
+            assertFailsWith<XmlyException> { client().resolve("101") }.code,
+        )
+    }
+
     private fun quotaBody(seconds: String, newDevice: String, stamp: Long = clock().toEpochMilli()): String {
         val duration = XmlyCrypto.encrypt("$seconds|$stamp", XmlyCrypto.durationKey).replace("\n", "")
         val device = XmlyCrypto.encrypt("$newDevice|$stamp", XmlyCrypto.durationKey).replace("\n", "")
