@@ -51,8 +51,9 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
     val snackbar = remember { SnackbarHostState() }
     val selected = Destination.entries[selectedIndex]
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    // The bar is always present: idle it offers "尚未选择声音 / 打开播放器".
-    val playerVisible = true
+    // Idle the bar offers "尚未选择声音 / 打开播放器"; settings keeps a clean
+    // list instead, and any real playback always shows the bar.
+    val playerVisible = state.playingTitle != null || selected != Destination.Settings
     // An opened album is an overlay above whichever tab started it, so 听过 and
     // 下载 can open albums too and come back to their own list.
     val albumOpen = state.album != null || state.albumLoading || state.albumError != null
@@ -190,7 +191,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
             modifier = Modifier.align(Alignment.BottomCenter),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            PlayerBar(
+            if (playerVisible) PlayerBar(
                 state = state,
                 onToggle = viewModel::togglePlayback,
                 onStop = viewModel::stopPlayback,
