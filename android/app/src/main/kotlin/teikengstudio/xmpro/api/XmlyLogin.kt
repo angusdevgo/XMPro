@@ -22,6 +22,12 @@ import teikengstudio.xmpro.model.XmlyException
 class XmlyLogin(
     private val client: OkHttpClient = defaultClient(),
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /**
+     * Device id used for the login cookie. Passing a per-install id keeps the
+     * server's device binding (and therefore the listening quota) stable across
+     * re-logins instead of treating every login as a new device.
+     */
+    deviceOverride: String? = null,
 ) {
     private class Pending(
         val id: String,
@@ -32,7 +38,7 @@ class XmlyLogin(
     )
 
     private val random = SecureRandom()
-    private val deviceId: String = uuid4()
+    private val deviceId: String = deviceOverride?.takeIf { it.isNotBlank() } ?: uuid4()
     private val lastSms = mutableMapOf<String, Long>()
     private val usedLots = mutableMapOf<String, Long>()
 
@@ -173,7 +179,9 @@ class XmlyLogin(
                     "quick_login",
                 )
                 checkActive(active)
+                android.util.Log.d("XmlyLoginKeys", login.keys().asSequence().toList().toString())
                 val nested = login.optJSONObject("data")
+                nested?.let { android.util.Log.d("XmlyLoginKeys", "data:" + it.keys().asSequence().toList().toString()) }
                 val rawUid = login.opt("uid")?.takeIf { it != "" && it != false && it != 0 } ?: nested?.opt("uid")
                 val rawToken = login.opt("token")?.takeIf { it != "" && it != false && it != 0 } ?: nested?.opt("token")
                 val uid = rawUid?.toString()
@@ -184,16 +192,10 @@ class XmlyLogin(
                     throw XmlyException("invalid_response", "登录响应缺少有效账号凭据")
                 }
                 pending = null
-                val scopes = listOfNotNull(login, nested)
-                fun field(vararg keys: String): String {
-                    for (scope in scopes) {
-                        for (key in keys) {
-                            val value = scope.opt(key) as? String
-                            if (!value.isNullOrBlank()) return value
-                        }
-                    }
-                    return ""
-                }
+                // Profile fields may sit at any depth of the response, so the
+                // whole tree is searched by key name.
+                fun field(vararg keys: String): String = findString(login, keys.toSet()) ?: ""
+
                 teikengstudio.xmpro.model.LoginResult(
                     credentials = Credentials("$uid&$token", active.deviceId),
                     nickname = field("nickname", "userName", "nickName"),
@@ -205,6 +207,38 @@ class XmlyLogin(
                 if (active.attempts >= 5 && pending === active) pending = null
             }
         }
+    }
+
+    /** Breadth-first lookup for the first non-blank string under [keys]. */
+    private fun findString(root: JSONObject, keys: Set<String>): String? {
+        val queue = ArrayDeque<Any>()
+        queue.add(root)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < 2000) {
+            visited++
+            when (val node = queue.removeFirst()) {
+                is JSONObject -> {
+                    for (key in node.keys()) {
+                        if (key in keys) {
+                            val value = node.opt(key) as? String
+                            if (!value.isNullOrBlank()) return value
+                        }
+                    }
+                    for (key in node.keys()) {
+                        when (val child = node.opt(key)) {
+                            is JSONObject, is org.json.JSONArray -> queue.add(child)
+                        }
+                    }
+                }
+
+                is org.json.JSONArray -> for (index in 0 until node.length()) {
+                    when (val child = node.opt(index)) {
+                        is JSONObject, is org.json.JSONArray -> queue.add(child)
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private fun checkActive(value: Pending) {

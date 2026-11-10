@@ -81,7 +81,7 @@ data class UiState(
 class MainViewModel(context: Context, private val container: AppContainer) : ViewModel() {
     private var ticker: Job? = null
     private val playback = container.playback
-    private val login = XmlyLogin()
+    private val login = XmlyLogin(deviceOverride = container.deviceId)
 
     private var sessionTrack: Track? = null
     private var sessionStartedAt = 0L
