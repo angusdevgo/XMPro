@@ -105,7 +105,9 @@ fun FloatingBottomBar(
                         .graphicsLayer { translationX = indicatorX }
                         .size(
                             width = with(density) { (tabWidthPx * 0.82f).toDp() },
-                            height = 44.dp,
+                            // Taller than the icon + label stack so the pill fully
+                            // surrounds the tab content instead of clipping it.
+                            height = 52.dp,
                         )
                         .clip(CircleShape)
                         .background(indicatorColor),
