@@ -215,7 +215,7 @@ class XmlyExperience(private val client: XmlyClient) {
                 updatedAt = time(row.opt("lastUpdateAt") ?: 0),
             )
         }
-        val hasMore = more(data)
+        val hasMore = (data.opt("hasMore") as? Boolean) ?: (items.size >= pageSize)
         if (hasMore && items.isEmpty()) throw invalid
         return SubscriptionPage(items, hasMore)
     }
@@ -228,8 +228,11 @@ class XmlyExperience(private val client: XmlyClient) {
             "/lite-mobile/like/v1/user-likes",
             mapOf("pageId" to page.toString(), "pageSize" to pageSize.toString()),
         )
-        val maxPage = integer(data.opt("maxPageId")) ?: throw invalid
-        if (integer(data.opt("pageId")) != page || integer(data.opt("pageSize")) != pageSize) throw invalid
+        val maxPage = integer(data.opt("maxPageId")) ?: 0
+        val echoedPage = integer(data.opt("pageId")) ?: 0
+        val echoedSize = integer(data.opt("pageSize")) ?: 0
+        if (echoedPage > 0 && echoedPage != page) throw invalid
+        if (echoedSize > 0 && echoedSize != pageSize) throw invalid
         val seen = mutableSetOf<String>()
         val items = rows(data.opt("dataList")).take(pageSize).mapNotNull { row ->
             if (integer(row.opt("resourceType")) != 1) throw invalid

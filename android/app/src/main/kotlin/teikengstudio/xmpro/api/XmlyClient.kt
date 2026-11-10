@@ -393,13 +393,15 @@ class XmlyClient(
         )
         seconds?.let { params["duration"] = it.toString() }
         val signature = XmlyCrypto.activitySignature(params)
-        val form = linkedMapOf<String, String>()
-        params.forEach { (key, value) -> if (key != "uid") form[key] = value }
-        form["signature"] = signature
-        val payload = http.postForm(
+        // The lite client posts this endpoint as JSON; a form body is rejected
+        // with ret=-100 even when the signature is correct.
+        val body = linkedMapOf<String, Any?>()
+        params.forEach { (key, value) -> if (key != "uid") body[key] = value }
+        body["signature"] = signature
+        val payload = http.postJson(
             mobile,
             "/lite-mobile/audi/func/v1/$name",
-            form = form,
+            json = body,
             credentials = account,
             readOnly = name == "config",
             responseLimit = XmlyHttp.MAX_RESPONSE_BYTES,
