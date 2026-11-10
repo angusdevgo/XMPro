@@ -103,6 +103,11 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
             }
         }
         viewModelScope.launch {
+            playback.error.collect { failure ->
+                if (failure != null) _state.update { it.copy(message = failure) }
+            }
+        }
+        viewModelScope.launch {
             playback.state.collect { player ->
                 _state.update {
                     it.copy(

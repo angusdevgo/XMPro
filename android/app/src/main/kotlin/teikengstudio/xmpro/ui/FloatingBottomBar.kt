@@ -74,9 +74,11 @@ fun FloatingBottomBar(
     var tabWidthPx by remember { mutableFloatStateOf(0f) }
     val indicatorX by animateFloatAsState(
         targetValue = positions.getOrNull(selectedIndex) ?: 0f,
+        // No overshoot: the indicator must never rest (or be seen) off the
+        // centre of the tab it belongs to.
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessLow,
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow,
         ),
         label = "bottomBarIndicator",
     )

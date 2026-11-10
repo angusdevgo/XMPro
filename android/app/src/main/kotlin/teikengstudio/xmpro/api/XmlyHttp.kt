@@ -55,6 +55,45 @@ class XmlyHttp(
         headers = headers,
     )
 
+    /**
+     * Follows a media redirect to its final CDN URL.
+     *
+     * Paid tracks come back as `https://mobile.ximalaya.com/mobile/redirect/...`
+     * which answers 302 with an http CDN object; ExoPlayer refuses that
+     * cross-protocol hop, so each hop is followed by hand and rewritten to
+     * https (the CDN serves the same signed object over TLS).
+     */
+    fun followRedirect(url: String): String {
+        var current = url
+        val plain = client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .build()
+        repeat(4) {
+            val request = Request.Builder()
+                .url(current)
+                .header("Range", "bytes=0-0")
+                .header("Accept", "*/*")
+                .build()
+            try {
+                plain.newCall(request).execute().use { response ->
+                    response.body?.close()
+                    if (response.code !in 300..399) return current
+                    val location = response.header("Location") ?: return current
+                    current = if (location.startsWith("http://")) {
+                        location.replaceFirst("http://", "https://")
+                    } else {
+                        location
+                    }
+                }
+            } catch (_: IOException) {
+                return current
+            }
+        }
+        return current
+    }
+
     fun postJson(
         origin: String,
         path: String,

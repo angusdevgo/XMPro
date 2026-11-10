@@ -40,8 +40,13 @@ fun mediaUri(value: String): String {
     val host = uri.host.lowercase()
     // The CDN serves the same object over TLS; the app forbids cleartext.
     if (scheme == "http" && (uri.port == -1 || uri.port == 80) &&
-        (host == "xmcdn.com" || host.endsWith(".xmcdn.com"))
+        (
+            host == "xmcdn.com" || host.endsWith(".xmcdn.com") ||
+                host == "ximalaya.com" || host.endsWith(".ximalaya.com")
+            )
     ) {
+        // Both the CDN and the redirect endpoints serve TLS; the app forbids
+        // cleartext, so a paid track's http redirect URL would fail to open.
         return value.replaceFirst("http://", "https://")
     }
     return value

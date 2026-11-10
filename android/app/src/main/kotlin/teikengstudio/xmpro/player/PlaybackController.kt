@@ -28,11 +28,26 @@ class PlaybackController(private val context: Context) {
     private val _state = MutableStateFlow(PlaybackUi())
     val state: StateFlow<PlaybackUi> = _state.asStateFlow()
 
+    /** Last player failure; surfaced to the UI instead of failing silently. */
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
     private var controller: MediaController? = null
     private var playbackStarted: (() -> Unit)? = null
     private var pending: ((MediaController) -> Unit)? = null
 
     private val listener = object : Player.Listener {
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            val httpCode = error.cause?.let { cause ->
+                (cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+            }
+            _error.value = when {
+                httpCode != null -> "播放失败：服务端返回 HTTP $httpCode"
+                else -> "播放失败：${error.errorCodeName}"
+            }
+            _state.update { it.copy(playing = false) }
+        }
+
         override fun onEvents(player: Player, events: Player.Events) {
             val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0
             _state.update {
@@ -70,6 +85,7 @@ class PlaybackController(private val context: Context) {
     fun start(url: String, title: String, onStarted: () -> Unit) {
         playbackStarted = onStarted
         withController { media ->
+            _error.value = null
             media.setMediaItem(mediaItemFor(url))
             media.prepare()
             media.play()

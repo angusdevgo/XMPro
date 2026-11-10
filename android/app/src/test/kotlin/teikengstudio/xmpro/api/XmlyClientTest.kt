@@ -212,9 +212,12 @@ class XmlyClientTest {
 
         val request = server.takeRequest()
         val body = request.body.readUtf8()
-        assertTrue(body.contains("signature="), "signature is submitted")
-        assertTrue(body.contains("deviceId=dev-1"))
-        assertTrue(!body.contains("uid="), "uid is never sent back")
+        // The lite client posts this endpoint as JSON; a form body is rejected
+        // with ret=-100 even when the signature is correct.
+        assertTrue(body.contains("\"signature\""), "signature is submitted")
+        assertTrue(body.contains("\"deviceId\":\"dev-1\""))
+        assertTrue(!body.contains("\"uid\""), "uid is never sent back")
+        assertTrue(request.getHeader("Content-Type")!!.startsWith("application/json"))
         assertEquals(credentials.cookie, request.getHeader("Cookie"))
     }
 
@@ -238,7 +241,7 @@ class XmlyClientTest {
         server.enqueue(MockResponse().setBody(quotaBody("3540", "false")))
         val quota = client(withAccount = true).debit("account-1", 60, "op-1")
         assertEquals(3540, quota.remainingSeconds)
-        assertTrue(server.takeRequest().body.readUtf8().contains("duration=60"))
+        assertTrue(server.takeRequest().body.readUtf8().contains("\"duration\":\"60\""))
     }
 
     @Test

@@ -54,6 +54,9 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
     val selected = Destination.entries[selectedIndex]
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val playerVisible = state.playingTitle != null
+    // An opened album is an overlay above whichever tab started it, so 听过 and
+    // 下载 can open albums too and come back to their own list.
+    val albumOpen = state.album != null || state.albumLoading || state.albumError != null
     // The content scrolls under the floating bars, so it needs matching bottom room.
     val contentBottom = navBottom + 88.dp + if (playerVisible) 76.dp else 0.dp
 
@@ -76,20 +79,20 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                 .fillMaxSize()
                 .statusBarsPadding(),
         ) {
-            when (selected) {
-                Destination.Home -> if (state.album != null || state.albumLoading || state.albumError != null) {
-                    AlbumScreen(
-                        state = state,
-                        bottomInset = contentBottom,
-                        onBack = viewModel::closeAlbum,
-                        onPlay = { viewModel.play(it) },
-                        onDownload = viewModel::download,
-                        onSubscribe = viewModel::setSubscribed,
-                        onSubscribeAll = { albumId ->
-                            state.album?.tracks?.firstOrNull()?.let(viewModel::download)
-                        },
-                    )
-                } else {
+            if (albumOpen) {
+                AlbumScreen(
+                    state = state,
+                    bottomInset = contentBottom,
+                    onBack = viewModel::closeAlbum,
+                    onPlay = { viewModel.play(it) },
+                    onDownload = viewModel::download,
+                    onSubscribe = viewModel::setSubscribed,
+                    onSubscribeAll = { 
+                        state.album?.tracks?.firstOrNull()?.let(viewModel::download)
+                    },
+                )
+            } else when (selected) {
+                Destination.Home -> {
                     HomeScreen(
                         state = state,
                         bottomInset = contentBottom,

@@ -219,11 +219,62 @@ class XmlyClient(
             val official = if (ascending) position else if (total > 0) total - position + 1 else null
             trackFromApi(map, albumId = number, officialPosition = official)?.let(tracks::add)
         }
-        val album = albumFromApi(payload.optJSONObject("album")?.toPlainMap() ?: emptyMap(), number, total)
+        // Some responses omit the album object; fall back to the track rows so
+        // the header never renders an empty title.
+        val albumMap = payload.optJSONObject("album")?.toPlainMap()
+            ?: data.toPlainMap()
+        val detail = albumDetail(number)
+        val album = albumFromApi(albumMap + detail, number, total).let { parsed ->
+            if (parsed.title.isNotEmpty()) {
+                parsed
+            } else {
+                val fromTrack = tracks.firstOrNull { it.album.isNotEmpty() }?.album ?: ""
+                if (fromTrack.isEmpty()) {
+                    parsed
+                } else {
+                    Album(
+                        rawId = parsed.id,
+                        title = fromTrack,
+                        artist = parsed.artist,
+                        intro = parsed.intro,
+                        coverUrl = parsed.coverUrl,
+                        total = parsed.total,
+                        raw = parsed.raw,
+                    )
+                }
+            }
+        }
         albums[number] = album
         while (albums.size > 512) albums.remove(albums.keys.first())
         for (track in tracks) metadata[track.number] = track
         return AlbumPage(album, tracks, page, pageSize, total)
+    }
+
+    /**
+     * Album header metadata; the track page alone returns no album object, so
+     * the title, anchor and intro come from the detail endpoint.
+     */
+    private fun albumDetail(album: String): Map<String, Any?> {
+        val payload = runCatching {
+            http.get(
+                mobile,
+                "/mobile-album/album/detail",
+                query = mapOf("albumId" to album, "device" to "android"),
+            )
+        }.getOrNull() ?: return emptyMap()
+        val data = payload.optJSONObject("data") ?: return emptyMap()
+        val info = data.optJSONObject("album") ?: return emptyMap()
+        val plain = info.toPlainMap().toMutableMap()
+        data.optJSONObject("user")?.let { user ->
+            (user.opt("nickname") as? String)?.let { plain["nickname"] = it }
+            (user.opt("avatar") as? String)?.let { plain["avatar"] = it }
+        }
+        data.optJSONObject("detail")?.let { detail ->
+            (detail.opt("intro") as? String)?.takeIf { it.isNotEmpty() }?.let { plain["intro"] = it }
+        }
+        // `title` is the detail endpoint's name for the album title.
+        (plain["title"] as? String)?.let { if (it.isNotEmpty()) plain["albumTitle"] = it }
+        return plain
     }
 
     // -------------------------------------------------------------------- track
@@ -313,8 +364,14 @@ class XmlyClient(
             QUALITIES.first { candidates.containsKey(it) }
         }
         val track = trackFromApi(info) ?: throw XmlyException("missing_track", "声音信息缺失")
+        var url = candidates.getValue(chosen)
+        // API-host URLs are redirects to the CDN; resolve them here so the
+        // player only ever sees a final https object URL.
+        if (!url.contains(".xmcdn.com/")) {
+            url = mediaUri(http.followRedirect(url))
+        }
         return ResolvedAudio(
-            url = candidates.getValue(chosen),
+            url = url,
             requiresReward = requiresReward,
             track = track,
             actualQuality = chosen,
