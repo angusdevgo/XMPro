@@ -1,8 +1,12 @@
 plugins {
     id("com.android.application")
-    id("dev.flutter.flutter-gradle-plugin")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// Release builds must be signed with the project keystore; debug signing is
+// never reused for a release APK.
 val signingValues = mapOf(
     "storeFile" to System.getenv("ANDROID_KEYSTORE_PATH"),
     "storePassword" to System.getenv("ANDROID_KEYSTORE_PASSWORD"),
@@ -21,27 +25,35 @@ if (releaseRequested) {
 
 android {
     namespace = "teikengstudio.xmpro"
-    compileSdk = 36
-    ndkVersion = "28.2.13676358"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "teikengstudio.xmpro"
+        minSdk = 24
+        targetSdk = 35
+        versionCode = 10
+        versionName = "1.2.0"
+        ndk { abiFilters += listOf("arm64-v8a") }
+        resourceConfigurations += listOf("zh", "en")
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    defaultConfig {
-        applicationId = "teikengstudio.xmpro"
-        minSdk = 24
-        targetSdk = 36
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+    buildFeatures {
+        compose = true
     }
 
     packaging {
         jniLibs {
+            // The bundled FFmpeg/FFprobe wrappers are executed as separate
+            // processes, so they must stay on the filesystem.
             useLegacyPackaging = true
             keepDebugSymbols += setOf("**/libxmplus_ffmpeg.so", "**/libxmplus_ffprobe.so")
         }
+        resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1")
     }
 
     signingConfigs {
@@ -56,13 +68,22 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+        }
         release {
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.findByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
         }
+    }
+
+    testOptions {
+        unitTests.all { it.useJUnitPlatform() }
     }
 }
 
@@ -72,28 +93,39 @@ kotlin {
     }
 }
 
-flutter {
-    source = "../.."
-}
-
 dependencies {
-    implementation("androidx.core:core:1.15.0")
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.activity:activity-compose:1.9.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+    implementation("androidx.navigation:navigation-compose:2.8.1")
+
+    implementation(platform("androidx.compose:compose-bom:2024.09.03"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+
+    testImplementation("org.jetbrains.kotlin:kotlin-test:2.0.20")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
 }
 
+// Native media tools are built by tool/build_android_media.sh. Local debug
+// builds may proceed without them, but release/CI builds must ship them.
 val verifyAndroidMediaTools = tasks.register("verifyAndroidMediaTools") {
-    val platforms = providers.gradleProperty("target-platform")
-        .orElse("android-arm64")
+    val required = providers.gradleProperty("xmpro.requireNativeTools")
+        .map { it.toBoolean() }
+        .orElse(false)
+    val abiDir = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
     doLast {
-        val abiNames = mapOf("android-arm" to "armeabi-v7a", "android-arm64" to "arm64-v8a", "android-x64" to "x86_64")
-        for (platform in platforms.get().split(",")) {
-            val abi = requireNotNull(abiNames[platform.trim()]) { "Unsupported Android target: $platform" }
-            for (tool in listOf("ffmpeg", "ffprobe")) {
-                val executable = file("src/main/jniLibs/$abi/libxmplus_$tool.so")
-                require(executable.isFile && executable.length() > 0) {
-                    "Missing Android $abi $tool. Run bash tool/build_android_media.sh $abi before building Flutter."
-                }
-            }
+        val missing = listOf("libxmplus_ffmpeg.so", "libxmplus_ffprobe.so").filter {
+            !abiDir.file(it).asFile.let { file -> file.isFile && file.length() > 0 }
         }
+        if (missing.isEmpty()) return@doLast
+        val message = "Missing arm64-v8a media tools ${missing.joinToString()}; " +
+            "run 'bash tool/build_android_media.sh arm64-v8a'."
+        if (required.get()) throw GradleException(message) else logger.warn("WARNING: $message")
     }
 }
-tasks.named("preBuild") { dependsOn(verifyAndroidMediaTools) }
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(verifyAndroidMediaTools) }

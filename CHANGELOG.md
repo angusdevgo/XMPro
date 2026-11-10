@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 安卓端改为 Kotlin + Jetpack Compose 实现，工程由 Flutter 切换为纯 Kotlin Gradle 构建。
 - 仅发布 Android arm64-v8a 安装包，移除 Windows 构建与桌面运行时代码。
 - 下载失败后按 30 秒起指数退避自动重试，次数受“失败重试上限”控制。
 - “全部继续”不再沿用上次轮换过的账号。

@@ -8,9 +8,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-env:
-  PUB_HOSTED_URL: https://pub.dev
-
 permissions:
   contents: read
 
@@ -35,33 +32,16 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '25'
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.47.9'
-          channel: stable
-          cache: true
-      - name: Resolve locked dependencies
-        run: |
-          # Strict while the lock still covers every declared dependency.
-          # A freshly added dev dependency briefly leaves the lock stale; resolve
-          # once (visible as a warning) instead of blocking validation entirely.
-          if grep -q '^  flutter_test:' pubspec.lock; then
-            flutter pub get --enforce-lockfile
-          else
-            echo "::warning::pubspec.lock 缺少 flutter_test，本次为普通解析；请运行 flutter pub get 并提交锁文件以恢复强制校验"
-            flutter pub get
-          fi
-      - name: Run unit tests
-        run: flutter test --no-pub
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
       - name: Restore source-built native media executables
         uses: actions/download-artifact@v7
         with:
           pattern: android-tools-*
           path: android/app/src/main/jniLibs/
           merge-multiple: true
-      - name: Compile Android (debug validation only, never published)
-        run: flutter build apk --debug --target-platform android-arm64 --no-pub
+      - name: Compile and unit test (debug, never published)
+        run: ./android/gradlew -p android :app:assembleDebug :app:testDebugUnitTest -Pxmpro.requireNativeTools=true
 
   signed:
     needs: native-tools
@@ -76,12 +56,8 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '25'
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.47.9'
-          channel: stable
-          cache: true
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
       - name: Check version and tag
         id: version
         env:
@@ -90,26 +66,23 @@ jobs:
           python3 - <<'PY'
           import os, re
           from pathlib import Path
-          match = re.search(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$', Path('pubspec.yaml').read_text(), re.M)
+          text = Path('android/app/build.gradle.kts').read_text()
+          match = re.search(r'versionName\s*=\s*"(\d+\.\d+\.\d+)"', text)
           if not match:
-              raise SystemExit('pubspec.yaml must contain a stable version: X.Y.Z+N')
-          version = match[1]
+              raise SystemExit('build.gradle.kts must declare versionName = "X.Y.Z"')
+          version = match.group(1)
           ref = os.environ['RELEASE_REF']
           if ref.startswith('refs/tags/') and ref != f'refs/tags/v{version}':
-              raise SystemExit(f'Tag must equal v{version} from pubspec.yaml')
+              raise SystemExit(f'Tag must equal v{version} from build.gradle.kts')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'version={version}\n')
           PY
-      - name: Resolve locked dependencies
-        run: flutter pub get --enforce-lockfile
       - name: Restore source-built native media executables
         uses: actions/download-artifact@v7
         with:
           pattern: android-tools-*
           path: android/app/src/main/jniLibs/
           merge-multiple: true
-      - name: Install APK verification tools
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0"'
       - name: Restore and validate release signing key
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -130,33 +103,31 @@ jobs:
             -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" \
             -file "$RUNNER_TEMP/xmpro-release.der"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/xmpro-release.jks" >> "$GITHUB_ENV"
-      - name: Build signed split APKs
+      - name: Build signed release APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: flutter build apk --release --split-per-abi --no-pub
-      - name: Verify APK signatures, package and version
+        run: ./android/gradlew -p android :app:assembleRelease -Pxmpro.requireNativeTools=true
+      - name: Verify APK signature, package and version
         env:
           APP_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           tools="$ANDROID_HOME/build-tools/36.0.0"
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          test -s "$apk"
           expected=$(sha256sum "$RUNNER_TEMP/xmpro-release.der" | cut -d' ' -f1)
+          "$tools/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/apk-cert.txt"
+          actual=$(awk '/^Signer #1 certificate SHA-256 digest:/ {print tolower($NF)}' "$RUNNER_TEMP/apk-cert.txt")
+          [[ "$actual" == "$expected" ]] || { echo '::error::APK signing certificate differs from release keystore'; exit 1; }
+          package=$("$tools/aapt" dump badging "$apk" | grep '^package:')
+          [[ "$package" == *"name='teikengstudio.xmpro'"* ]] || { echo '::error::Unexpected applicationId'; exit 1; }
+          [[ "$package" == *"versionName='$APP_VERSION'"* ]] || { echo '::error::Unexpected APK version'; exit 1; }
           mkdir -p release
-          for abi in arm64-v8a; do
-            apk="build/app/outputs/flutter-apk/app-$abi-release.apk"
-            test -s "$apk"
-            "$tools/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/apk-cert.txt"
-            actual=$(awk '/^Signer #1 certificate SHA-256 digest:/ {print tolower($NF)}' "$RUNNER_TEMP/apk-cert.txt")
-            [[ "$actual" == "$expected" ]] || { echo '::error::APK signing certificate differs from release keystore'; exit 1; }
-            package=$("$tools/aapt" dump badging "$apk" | grep '^package:')
-            [[ "$package" == *"name='teikengstudio.xmpro'"* ]] || { echo '::error::Unexpected applicationId'; exit 1; }
-            [[ "$package" == *"versionName='$APP_VERSION'"* ]] || { echo '::error::Unexpected APK version'; exit 1; }
-            cp "$apk" "release/XMPro-$APP_VERSION-android-$abi.apk"
-          done
+          cp "$apk" "release/XMPro-$APP_VERSION-android-arm64-v8a.apk"
           (cd release && sha256sum ./*.apk > SHA256SUMS)
-      - name: Upload verified release APKs
+      - name: Upload verified release APK
         uses: actions/upload-artifact@v6
         with:
           name: XMPro-${{ steps.version.outputs.version }}-android

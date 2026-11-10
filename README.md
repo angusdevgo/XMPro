@@ -18,14 +18,15 @@
 
 ## 编译
 
-工具链：Flutter 3.47.9 / Dart 3.13.7、Java 25、Gradle 9.9.0、AGP 9.5.1、Kotlin 2.4.21；Android `compileSdk` / `targetSdk` 为 36，NDK 为 28.2.13676358。依赖版本和校验值锁定在 `pubspec.lock`。
+工具链：Kotlin + Jetpack Compose、JDK 17、Gradle 8.9、AGP 8.7.3；`compileSdk` 35、`minSdk` 24，仅 `arm64-v8a`，NDK 为 28.2.13676358。
 
-先在 Linux x86_64 安装 Android NDK 28.2.13676358、`jq`、`make`、`tar`、`sha256sum`，再运行：
+先在 Linux x86_64 安装 Android NDK 28.2.13676358、`jq`、`make`、`tar`、`sha256sum`，构建随包 FFmpeg 后再编译：
 
 ```sh
-flutter pub get --enforce-lockfile
 bash tool/build_android_media.sh arm64-v8a
-flutter build apk --release --target-platform android-arm64 --split-per-abi --no-pub
+./android/gradlew -p android :app:assembleDebug
 ```
 
-正式 Android 构建必须配置 JKS 签名环境变量：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_PASSWORD`、`ANDROID_KEY_ALIAS`。签名材料不得提交到仓库。
+正式构建必须配置 JKS 签名环境变量：`ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_PASSWORD`、`ANDROID_KEY_ALIAS`。签名材料不得提交到仓库。
+
+> 正在从 Flutter 迁移到纯 Kotlin：`lib/`、`pubspec.yaml`、`test/` 暂时作为逐行对照参考保留，不再参与构建，迁移完成后删除。迁移前的可构建版本见 git 标签 `flutter-final`。
