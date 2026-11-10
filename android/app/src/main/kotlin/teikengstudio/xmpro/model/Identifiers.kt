@@ -37,6 +37,13 @@ fun mediaUri(value: String): String {
     val scheme = uri.scheme?.lowercase()
     if (scheme != "http" && scheme != "https") throw XmlyException("invalid_media", "音频地址无效")
     if (uri.host.isNullOrEmpty() || uri.userInfo != null) throw XmlyException("invalid_media", "音频地址无效")
+    val host = uri.host.lowercase()
+    // The CDN serves the same object over TLS; the app forbids cleartext.
+    if (scheme == "http" && (uri.port == -1 || uri.port == 80) &&
+        (host == "xmcdn.com" || host.endsWith(".xmcdn.com"))
+    ) {
+        return value.replaceFirst("http://", "https://")
+    }
     return value
 }
 

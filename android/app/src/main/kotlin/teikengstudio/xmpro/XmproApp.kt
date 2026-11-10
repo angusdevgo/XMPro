@@ -1,13 +1,18 @@
 package teikengstudio.xmpro
 
 import android.app.Application
+import teikengstudio.xmpro.data.AppContainer
 
-/**
- * Process-wide holder for long-lived services. Real instances are wired in
- * later milestones; keeping the entry point here avoids a singleton sprawl.
- */
+/** Owns the single service graph for the process. */
 class XmproApp : Application() {
+    lateinit var container: AppContainer
+        private set
+
     override fun onCreate() {
         super.onCreate()
+        container = AppContainer(this)
+        // A crash during a debit leaves `submitting` receipts; reconcile them
+        // locally before any playback or download can start.
+        runCatching { container.ledger.recoverAll() }
     }
 }

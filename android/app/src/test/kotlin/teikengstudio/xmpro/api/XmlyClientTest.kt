@@ -160,7 +160,7 @@ class XmlyClientTest {
         )
 
         // With an account: the quota probe reports zero remaining seconds.
-        server.enqueue(MockResponse().setBody("""{"ret":0,"data":{"trackId":101,"duration":301,"isPaid":true}}"""))
+        server.enqueue(MockResponse().setBody(encryptedInfo("""{"trackId":101,"duration":301,"isPaid":true}""")))
         server.enqueue(MockResponse().setBody(quotaBody("0", "false")))
         assertEquals(
             "insufficient_quota",
@@ -187,6 +187,14 @@ class XmlyClientTest {
             "permission_denied",
             assertFailsWith<XmlyException> { client().resolve("101") }.code,
         )
+    }
+
+
+    /** Wraps track info in the encrypted envelope used by signed baseInfo. */
+    private fun encryptedInfo(info: String): String {
+        val inner = "{\"trackInfo\":$info}"
+        val cipher = XmlyCrypto.encrypt(inner, XmlyCrypto.playKey).replace("\n", "")
+        return """{"ret":0,"data":"$cipher"}"""
     }
 
     private fun quotaBody(seconds: String, newDevice: String, stamp: Long = clock().toEpochMilli()): String {
@@ -235,12 +243,16 @@ class XmlyClientTest {
 
     @Test
     fun `track info verifies the returned identity`() {
-        server.enqueue(MockResponse().setBody("""{"ret":0,"data":{"trackId":101,"title":"第一集","duration":301,"albumId":998}}"""))
+        server.enqueue(MockResponse().setBody(encryptedInfo("""{"trackId":101,"title":"第一集","duration":301,"albumId":998}""")))
         val track = client(withAccount = true).track("101")
         assertEquals("101", track.number)
         assertEquals(301.0, track.duration, 0.001)
 
-        server.enqueue(MockResponse().setBody("""{"ret":0,"data":{"trackId":999,"title":"别的"}}"""))
+        // Anonymous callers use the public endpoint with plain JSON.
+        server.enqueue(MockResponse().setBody("""{"ret":0,"data":{"trackId":101,"title":"公开","duration":12}}"""))
+        assertEquals("公开", client().track("101").title)
+
+        server.enqueue(MockResponse().setBody(encryptedInfo("""{"trackId":999,"title":"别的"}""")))
         assertEquals(
             "id_mismatch",
             assertFailsWith<XmlyException> { client(withAccount = true).track("101") }.code,

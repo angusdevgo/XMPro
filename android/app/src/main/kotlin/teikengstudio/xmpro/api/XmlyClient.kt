@@ -38,6 +38,10 @@ class XmlyClient(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Track>?): Boolean = size > 512
     }
 
+    /** Unauthenticated mobile GET used by the public index endpoints. */
+    fun getMobile(path: String, query: Map<String, String> = emptyMap()): JSONObject =
+        http.get(mobile, path, query = query)
+
     // ---------------------------------------------------------------- catalogue
 
     fun search(query: String, kind: String = "track", page: Int = 1, pageSize: Int = 20): SearchPage {
@@ -153,20 +157,7 @@ class XmlyClient(
 
     fun track(number: String): Track {
         val id = xmlyIdentifier(number)
-        val payload = http.get(
-            mobile,
-            "/fmobile-track/fmobile/track/v2/baseInfo",
-            query = mapOf("device" to "android", "trackId" to id),
-            credentials = credentials,
-            signed = credentials != null,
-            readOnly = true,
-        )
-        val data = payload.optJSONObject("data") ?: throw XmlyException("missing_track", "声音信息缺失")
-        val map = data.toPlainMap()
-        val returned = (map["trackId"] ?: map["id"] ?: "").toString()
-        if (returned.isNotEmpty() && xmlyIdentifier(returned) != id) {
-            throw XmlyException("id_mismatch", "声音信息不匹配")
-        }
+        val map = trackInfoMap(id)
         return trackFromApi(map) ?: throw XmlyException("missing_track", "声音信息缺失")
     }
 
@@ -259,21 +250,50 @@ class XmlyClient(
     }
 
     private fun trackInfoMap(id: String, reward: Quota? = null): Map<String, Any?> {
-        val query = linkedMapOf<String, String>("device" to "android", "trackId" to id)
-        if (reward != null) {
-            query["a1"] = if (reward.newDevice) "1" else reward.remainingSeconds.toString()
-            query["a2"] = clock().toEpochMilli().toString()
-            query["a3"] = "0"
+        val account = credentials
+        if (account == null) {
+            // Anonymous callers use the public endpoint; the signed mobile one
+            // rejects unauthenticated requests with HTTP 405.
+            val payload = http.get(
+                mobile,
+                "/mobile/track/$id",
+                query = mapOf("device" to "android"),
+            )
+            // The public endpoint returns the track object at the top level;
+            // the signed one wraps it in `data`.
+            return matchingInfo(payload.optJSONObject("data") ?: payload, id)
         }
-        val payload = http.get(
+        val params = linkedMapOf<String, Any>("device" to "android", "trackId" to id)
+        if (reward != null) {
+            params["a1"] = if (reward.newDevice) "1" else reward.remainingSeconds.toString()
+            params["a2"] = clock().toEpochMilli().toString()
+            params["a3"] = "0"
+        }
+        val encrypted = XmlyCrypto.encrypt(JSONObject(params).toString(), XmlyCrypto.playKey)
+        val payload = http.postJson(
             mobile,
             "/fmobile-track/fmobile/track/v2/baseInfo",
-            query = query,
-            credentials = credentials,
-            signed = credentials != null,
+            json = mapOf("data" to encrypted),
+            credentials = account,
+            signed = true,
             readOnly = true,
         )
-        val data = payload.optJSONObject("data") ?: throw XmlyException("missing_track", "声音信息缺失")
+        val body = payload.opt("data") as? String
+            ?: throw XmlyException("invalid_authorization", "授权声音信息无效")
+        val decoded = try {
+            JSONObject(XmlyCrypto.decrypt(body, XmlyCrypto.playKey))
+        } catch (_: Exception) {
+            throw XmlyException("invalid_authorization", "授权声音信息无效")
+        }
+        var info: Any? = decoded.opt("trackInfo")
+        if (info is String) info = runCatching { JSONObject(info as String) }.getOrNull()
+        val objectInfo = info as? JSONObject
+            ?: throw XmlyException("invalid_authorization", "授权声音信息无效")
+        return matchingInfo(objectInfo, id)
+    }
+
+    private fun matchingInfo(data: JSONObject?, id: String): Map<String, Any?> {
+        if (data == null) throw XmlyException("missing_track", "声音信息缺失")
         val map = data.toPlainMap()
         val returned = (map["trackId"] ?: map["id"] ?: "").toString()
         if (returned.isNotEmpty() && xmlyIdentifier(returned) != id) {

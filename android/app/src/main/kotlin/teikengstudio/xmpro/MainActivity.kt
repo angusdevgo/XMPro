@@ -6,29 +6,42 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
-import androidx.activity.enableEdgeToEdge
 import teikengstudio.xmpro.ui.ShellScreen
 import teikengstudio.xmpro.ui.theme.XmproTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // The window theme paints both system bars with the theme background, so
-        // the app never shows a black bar above or below the Compose surface.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val container = (application as XmproApp).container
         setContent {
-            val dark = isSystemInDarkTheme()
+            var oledBlack by remember { mutableStateOf(container.oledBlack()) }
+            var themeMode by remember { mutableStateOf(container.themeMode()) }
+            val dark = when (themeMode) {
+                "light" -> false
+                "dark" -> true
+                else -> isSystemInDarkTheme()
+            }
             LaunchedEffect(dark) {
-                // Transparent bars inherit the app background; their icons must
-                // follow the theme or they become invisible on light surfaces.
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     isAppearanceLightStatusBars = !dark
                     isAppearanceLightNavigationBars = !dark
                 }
             }
-            XmproTheme(darkTheme = dark) {
-                ShellScreen()
+            XmproTheme(darkTheme = dark, oledBlack = oledBlack) {
+                ShellScreen(
+                    container = container,
+                    oledBlack = oledBlack,
+                    onOledBlackChange = {
+                        oledBlack = it
+                        container.setOledBlack(it)
+                    },
+                )
             }
         }
     }
