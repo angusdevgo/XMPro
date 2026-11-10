@@ -3,9 +3,6 @@ package teikengstudio.xmpro.ui
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,6 +17,8 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import teikengstudio.xmpro.data.AppContainer
+import teikengstudio.xmpro.download.DownloadState
+import teikengstudio.xmpro.download.DownloadTask
 import teikengstudio.xmpro.api.XmlyExperience
 import teikengstudio.xmpro.model.HomeChannel
 import teikengstudio.xmpro.model.HomeSection
@@ -47,6 +46,7 @@ data class UiState(
     val durationMs: Long = 0,
     val downloads: List<File> = emptyList(),
     val downloadProgress: Map<String, Float> = emptyMap(),
+    val downloadTasks: List<DownloadTask> = emptyList(),
     val message: String? = null,
     val channels: List<HomeChannel> = emptyList(),
     val channelId: Int = 0,
@@ -58,22 +58,9 @@ data class UiState(
 )
 
 class MainViewModel(context: Context, private val container: AppContainer) : ViewModel() {
-    private val appContext = context.applicationContext
-    private val player: ExoPlayer = ExoPlayer.Builder(appContext).build().apply {
-        addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) {
-                _state.update { it.copy(isPlaying = playing) }
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) {
-                    _state.update { it.copy(durationMs = duration.coerceAtLeast(0)) }
-                }
-            }
-        })
-    }
     private val http = OkHttpClient()
     private var ticker: Job? = null
+    private val playback = container.playback
 
     private val _state = MutableStateFlow(
         UiState(
@@ -83,6 +70,28 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
         ),
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
+
+    init {
+        // The service owns the player; mirror its state into the UI model.
+        viewModelScope.launch {
+            container.downloads.tasks.collect { list ->
+                _state.update { it.copy(downloadTasks = list) }
+            }
+        }
+        viewModelScope.launch {
+            playback.state.collect { player ->
+                _state.update {
+                    it.copy(
+                        playingTitle = player.title,
+                        isPlaying = player.playing,
+                        positionMs = player.positionMs,
+                        durationMs = player.durationMs,
+                    )
+                }
+                if (player.playing) startTicker() else ticker?.cancel()
+            }
+        }
+    }
 
     // -------------------------------------------------------------------- home
 
@@ -189,18 +198,9 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                 val resolved = withContext(Dispatchers.IO) {
                     container.client(container.activeAccount).resolve(track.number)
                 }
-                player.setMediaItem(MediaItem.fromUri(resolved.url))
-                player.prepare()
-                player.play()
-                _state.update {
-                    it.copy(
-                        playing = resolved.track,
-                        playingTitle = resolved.track.title,
-                        durationMs = 0,
-                        positionMs = 0,
-                    )
+                playback.start(resolved.url, resolved.track.title) {
+                    _state.update { it.copy(playing = resolved.track) }
                 }
-                startTicker()
             } catch (error: Exception) {
                 _state.update { it.copy(message = describe(error)) }
             }
@@ -208,37 +208,26 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
     }
 
     fun playFile(file: File) {
-        player.setMediaItem(MediaItem.fromUri(file.toURI().toString()))
-        player.prepare()
-        player.play()
-        _state.update {
-            it.copy(playingTitle = file.nameWithoutExtension, playing = null, positionMs = 0, durationMs = 0)
+        playback.start(file.toURI().toString(), file.nameWithoutExtension) {
+            _state.update { it.copy(playing = null) }
         }
-        startTicker()
     }
 
-    fun togglePlayback() {
-        if (player.isPlaying) player.pause() else player.play()
-    }
+    fun togglePlayback() = playback.toggle()
 
-    fun seekTo(positionMs: Long) {
-        player.seekTo(positionMs)
-        _state.update { it.copy(positionMs = positionMs) }
-    }
+    fun seekTo(positionMs: Long) = playback.seekTo(positionMs)
 
     fun stopPlayback() {
-        player.stop()
+        playback.stop()
         ticker?.cancel()
-        _state.update { it.copy(playing = null, playingTitle = null, isPlaying = false, positionMs = 0, durationMs = 0) }
+        _state.update { it.copy(playing = null) }
     }
 
     private fun startTicker() {
         if (ticker?.isActive == true) return
         ticker = viewModelScope.launch {
             while (isActive) {
-                _state.update {
-                    it.copy(positionMs = player.currentPosition.coerceAtLeast(0))
-                }
+                _state.update { it.copy(positionMs = playback.currentPosition()) }
                 delay(500)
             }
         }
@@ -247,55 +236,16 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
     // --------------------------------------------------------------- downloads
 
     fun download(track: Track) {
-        val key = track.number
-        if (_state.value.downloadProgress.containsKey(key)) return
-        _state.update { it.copy(downloadProgress = it.downloadProgress + (key to 0f)) }
-        viewModelScope.launch {
-            try {
-                val resolved = withContext(Dispatchers.IO) {
-                    container.client(container.activeAccount).resolve(track.number)
-                }
-                val target = File(container.downloadRoot(), fileName(resolved.track, resolved.url))
-                withContext(Dispatchers.IO) {
-                    val request = Request.Builder().url(resolved.url).build()
-                    http.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) throw XmlyException("http", "下载失败 HTTP ${response.code}")
-                        val body = response.body ?: throw XmlyException("http", "下载响应为空")
-                        val total = body.contentLength()
-                        body.byteStream().use { input ->
-                            target.outputStream().use { output ->
-                                val buffer = ByteArray(64 * 1024)
-                                var copied = 0L
-                                while (true) {
-                                    val read = input.read(buffer)
-                                    if (read <= 0) break
-                                    output.write(buffer, 0, read)
-                                    copied += read
-                                    if (total > 0) {
-                                        val progress = (copied * 100 / total).toInt() / 100f
-                                        _state.update {
-                                            it.copy(downloadProgress = it.downloadProgress + (key to progress))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                _state.update {
-                    it.copy(
-                        downloadProgress = it.downloadProgress - key,
-                        downloads = container.downloads(),
-                        message = "已保存 ${target.name}",
-                    )
-                }
-            } catch (error: Exception) {
-                _state.update {
-                    it.copy(downloadProgress = it.downloadProgress - key, message = describe(error))
-                }
-            }
-        }
+        container.downloads.enqueue(track)
     }
+
+    fun downloadTasks(): List<DownloadTask> = container.downloads.tasks.value
+
+    fun pauseDownload(task: DownloadTask) = container.downloads.pause(task.id)
+
+    fun resumeDownload(task: DownloadTask) = container.downloads.resume(task.id)
+
+    fun cancelDownload(task: DownloadTask) = container.downloads.cancel(task.id)
 
     fun refreshDownloads() = _state.update { it.copy(downloads = container.downloads()) }
 
@@ -335,7 +285,6 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
 
     override fun onCleared() {
         ticker?.cancel()
-        player.release()
         super.onCleared()
     }
 

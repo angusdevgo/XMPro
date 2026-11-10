@@ -115,6 +115,9 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                     onPlayFile = viewModel::playFile,
                     onDelete = viewModel::deleteDownload,
                     onRefresh = viewModel::refreshDownloads,
+                    onPauseTask = viewModel::pauseDownload,
+                    onResumeTask = viewModel::resumeDownload,
+                    onCancelTask = viewModel::cancelDownload,
                 )
 
                 Destination.Settings -> SettingsScreen(

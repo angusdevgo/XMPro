@@ -41,6 +41,24 @@ class AppContainer(context: Context) {
 
     val ledger = UsageLedger(store, quotaSource)
 
+    val downloads by lazy {
+        teikengstudio.xmpro.download.DownloadManager(
+            context = appContext,
+            storage = store,
+            directory = { downloadRoot() },
+            resolve = { number ->
+                val resolved = client(activeAccount).resolve(number)
+                resolved.url to resolved.actualQuality
+            },
+        )
+    }
+
+    val playback = teikengstudio.xmpro.player.PlaybackController(appContext).apply {
+        // Connecting early keeps the RPC warm; the service itself only starts
+        // when a media item is set.
+        runCatching { connect() }
+    }
+
     // ------------------------------------------------------------------ session
 
     private val prefs = appContext.getSharedPreferences("xmpro_session", Context.MODE_PRIVATE)
