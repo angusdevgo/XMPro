@@ -1,6 +1,7 @@
 package teikengstudio.xmpro.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ fun PlayerBar(
     state: UiState,
     onToggle: () -> Unit,
     onStop: () -> Unit,
+    onOpenPlayer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val title = state.playingTitle ?: return
@@ -44,7 +46,8 @@ fun PlayerBar(
                 .fillMaxWidth()
                 .shadow(elevation = 6.dp, shape = RoundedCornerShape(20.dp), clip = false)
                 .clip(RoundedCornerShape(20.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f)),
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f))
+                .clickable(onClick = onOpenPlayer),
         ) {
             val progress = if (state.durationMs > 0) {
                 (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)

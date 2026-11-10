@@ -74,6 +74,11 @@ data class UiState(
     val accounts: List<AccountSummary> = emptyList(),
     val autoClaim: Boolean = false,
     val accountBusy: Boolean = false,
+    /** Playback queue and the index of the track that is loaded. */
+    val queue: List<Track> = emptyList(),
+    val queueIndex: Int = 0,
+    val speed: Float = 1f,
+    val sleepAtMillis: Long? = null,
 )
 
 class MainViewModel(context: Context, private val container: AppContainer) : ViewModel() {
@@ -83,6 +88,7 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
 
     private var sessionTrack: Track? = null
     private var sessionStartedAt = 0L
+    private var sleepJob: Job? = null
 
     private val _state = MutableStateFlow(
         UiState(
@@ -247,8 +253,14 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
 
     // ------------------------------------------------------------------ player
 
-    fun play(track: Track, resumePositionMs: Long = 0) {
-        _state.update { it.copy(message = null) }
+    fun play(track: Track, resumePositionMs: Long = 0) = playQueue(listOf(track), 0, resumePositionMs)
+
+    /** Plays [track] inside [queue] so next/previous walk the same list. */
+    fun playQueue(queue: List<Track>, index: Int, resumePositionMs: Long = 0) {
+        val track = queue.getOrNull(index) ?: return
+        _state.update {
+            it.copy(message = null, queue = queue, queueIndex = index)
+        }
         viewModelScope.launch {
             try {
                 val resolved = withContext(Dispatchers.IO) {
@@ -264,6 +276,72 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                 _state.update { it.copy(message = describe(error)) }
             }
         }
+    }
+
+    /** Plays the currently opened album from [track]'s position. */
+    fun playAlbum(track: Track) {
+        val tracks = _state.value.album?.tracks ?: listOf(track)
+        playQueue(tracks, tracks.indexOf(track).coerceAtLeast(0))
+    }
+
+    /** Plays the "listening updates" feed from [track]'s position. */
+    fun playUpdates(track: Track) {
+        val tracks = _state.value.updates.map { it.track }
+        playQueue(tracks, tracks.indexOf(track).coerceAtLeast(0))
+    }
+
+    fun next() {
+        val current = _state.value
+        val index = current.queueIndex + 1
+        if (index >= current.queue.size) {
+            _state.update { it.copy(message = "已是最后一集") }
+            return
+        }
+        playQueue(current.queue, index)
+    }
+
+    fun previous() {
+        val current = _state.value
+        if (current.positionMs > 5000) {
+            playback.seekTo(0)
+            return
+        }
+        val index = current.queueIndex - 1
+        if (index < 0) {
+            playback.seekTo(0)
+            return
+        }
+        playQueue(current.queue, index)
+    }
+
+    fun skipBy(deltaMs: Long) = playback.skipBy(deltaMs)
+
+    fun cycleSpeed() {
+        val speeds = listOf(1f, 1.25f, 1.5f, 2f, 0.75f)
+        val next = speeds[(speeds.indexOf(_state.value.speed).coerceAtLeast(0) + 1) % speeds.size]
+        playback.setSpeed(next)
+        _state.update { it.copy(speed = next) }
+    }
+
+    /** [minutes] == null cancels the timer. */
+    fun setSleepTimer(minutes: Int?) {
+        sleepJob?.cancel()
+        if (minutes == null) {
+            _state.update { it.copy(sleepAtMillis = null) }
+            return
+        }
+        val deadline = System.currentTimeMillis() + minutes * 60_000L
+        _state.update { it.copy(sleepAtMillis = deadline, message = "${minutes} 分钟后停止播放") }
+        sleepJob = viewModelScope.launch {
+            delay(minutes * 60_000L)
+            stopPlayback()
+            _state.update { it.copy(sleepAtMillis = null, message = "定时关闭已触发") }
+        }
+    }
+
+    fun toggleFavoriteOfPlaying() {
+        val track = _state.value.playing ?: return
+        setFavorite(track, true)
     }
 
     fun playFile(file: File) {
@@ -638,6 +716,7 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
 
     override fun onCleared() {
         ticker?.cancel()
+        sleepJob?.cancel()
         login.clear()
         super.onCleared()
     }

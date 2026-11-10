@@ -101,6 +101,13 @@ class PlaybackController(private val context: Context) {
 
     fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs) }
 
+    fun skipBy(deltaMs: Long) = withController { media ->
+        val target = (media.currentPosition + deltaMs).coerceIn(0, maxOf(media.duration, 0))
+        media.seekTo(target)
+    }
+
+    fun setSpeed(speed: Float) = withController { it.setPlaybackSpeed(speed) }
+
     fun stop() = withController {
         it.stop()
         it.clearMediaItems()

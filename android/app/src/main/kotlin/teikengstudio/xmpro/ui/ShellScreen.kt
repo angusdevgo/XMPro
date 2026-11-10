@@ -49,6 +49,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
     val viewModel: MainViewModel = viewModel { MainViewModel(context, container) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     var selectedIndex by rememberSaveable { mutableStateOf(0) }
+    var playerOpen by rememberSaveable { mutableStateOf(false) }
     var themeMode by remember { mutableStateOf(viewModel.themeMode()) }
     val snackbar = remember { SnackbarHostState() }
     val selected = Destination.entries[selectedIndex]
@@ -84,7 +85,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                     state = state,
                     bottomInset = contentBottom,
                     onBack = viewModel::closeAlbum,
-                    onPlay = { viewModel.play(it) },
+                    onPlay = viewModel::playAlbum,
                     onDownload = viewModel::download,
                     onSubscribe = viewModel::setSubscribed,
                     onSubscribeAll = { 
@@ -112,7 +113,13 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                     bottomInset = contentBottom,
                     onRefresh = viewModel::refreshListening,
                     onOpenAlbum = viewModel::openAlbum,
-                    onPlay = { track, positionMs -> viewModel.play(track, positionMs) },
+                    onPlay = { track, positionMs ->
+                        if (positionMs > 0) {
+                            viewModel.play(track, positionMs)
+                        } else {
+                            viewModel.playUpdates(track)
+                        }
+                    },
                     onDownload = viewModel::download,
                     onUnsubscribe = { viewModel.setSubscribed(it, false) },
                     onUnfavorite = { viewModel.setFavorite(it, false) },
@@ -171,6 +178,29 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = contentBottom),
         )
 
+        if (playerOpen) {
+            PlayerSheet(
+                state = state,
+                onDismiss = { playerOpen = false },
+                onToggle = viewModel::togglePlayback,
+                onStop = {
+                    viewModel.stopPlayback()
+                    playerOpen = false
+                },
+                onNext = viewModel::next,
+                onPrevious = viewModel::previous,
+                onSkip = viewModel::skipBy,
+                onSeek = viewModel::seekTo,
+                onCycleSpeed = viewModel::cycleSpeed,
+                onFavorite = viewModel::toggleFavoriteOfPlaying,
+                onSleepTimer = viewModel::setSleepTimer,
+                onSelectQueue = { index ->
+                    viewModel.playQueue(state.queue, index)
+                },
+            )
+            return@Box
+        }
+
         Column(
             modifier = Modifier.align(Alignment.BottomCenter),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -179,6 +209,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                 state = state,
                 onToggle = viewModel::togglePlayback,
                 onStop = viewModel::stopPlayback,
+                onOpenPlayer = { if (state.playingTitle != null) playerOpen = true },
             )
             FloatingBottomBar(
                 items = navItems,
