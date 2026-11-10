@@ -1,0 +1,309 @@
+package teikengstudio.xmpro.api
+
+import java.time.Instant
+import org.json.JSONArray
+import org.json.JSONObject
+import teikengstudio.xmpro.data.QuotaSource
+import teikengstudio.xmpro.model.Album
+import teikengstudio.xmpro.model.AlbumPage
+import teikengstudio.xmpro.model.Credentials
+import teikengstudio.xmpro.model.Quota
+import teikengstudio.xmpro.model.SearchPage
+import teikengstudio.xmpro.model.Track
+import teikengstudio.xmpro.model.XMLY_ALBUM_PAGE_SIZE
+import teikengstudio.xmpro.model.XmlyException
+import teikengstudio.xmpro.model.coverUrl
+import teikengstudio.xmpro.model.publicRaw
+import teikengstudio.xmpro.model.xmlyIdentifier
+import teikengstudio.xmpro.model.xmlyPositive
+
+/**
+ * Read-only Ximalaya API surface for one account (or anonymous use).
+ *
+ * Billing calls live here too because the signature scheme is account scoped;
+ * [UsageLedger] decides when they run.
+ */
+class XmlyClient(
+    private val http: XmlyHttp = XmlyHttp(),
+    val credentials: Credentials? = null,
+    private val clock: () -> Instant = { Instant.now() },
+    private val mobile: String = MOBILE,
+    private val searchOrigin: String = XmlyHttp.SEARCH_ORIGIN,
+) : QuotaSource {
+    val identity: String = credentials?.identity ?: ANONYMOUS
+    private val albums = LinkedHashMap<String, Album>()
+    private val metadata = object : LinkedHashMap<String, Track>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Track>?): Boolean = size > 512
+    }
+
+    // ---------------------------------------------------------------- catalogue
+
+    fun search(query: String, kind: String = "track", page: Int = 1, pageSize: Int = 20): SearchPage {
+        if (query.isBlank() || query.length > 200 || kind !in setOf("track", "album")) {
+            throw XmlyException("invalid_search", "请输入 1..200 字的关键词", definitive = true)
+        }
+        paging(page, pageSize)
+        val payload = http.get(
+            searchOrigin,
+            "/revision/search",
+            query = mapOf(
+                "kw" to query.trim(),
+                "core" to kind,
+                "page" to page.toString(),
+                "rows" to pageSize.toString(),
+                "device" to "iPhone",
+                "condition" to "relation",
+                "spellchecker" to "true",
+            ),
+        )
+        val values = payload.optJSONObject("data")
+            ?.optJSONObject("result")
+            ?.optJSONObject("response")
+            ?: throw XmlyException("invalid_catalogue", "搜索结果无效")
+        val docs = values.optJSONArray("docs") ?: throw XmlyException("invalid_catalogue", "搜索结果无效")
+        val tracks = mutableListOf<Track>()
+        val found = mutableListOf<Album>()
+        for (index in 0 until minOf(docs.length(), pageSize)) {
+            val raw = docs.optJSONObject(index) ?: continue
+            val map = raw.toPlainMap()
+            if (kind == "album") {
+                val id = map["albumId"] ?: map["id"] ?: continue
+                found += albumFromApi(map, xmlyIdentifier(id.toString()))
+            } else {
+                val track = trackFromApi(map)
+                if (track != null) tracks += track
+            }
+        }
+        val total = values.optInt("numFound", docs.length())
+        return SearchPage(tracks, found, page, pageSize, total, kind)
+    }
+
+    fun album(albumId: String, page: Int = 1, pageSize: Int = XMLY_ALBUM_PAGE_SIZE, ascending: Boolean = true): AlbumPage {
+        val number = xmlyIdentifier(albumId)
+        paging(page, pageSize, XMLY_ALBUM_PAGE_SIZE)
+        val payload = http.get(
+            mobile,
+            "/mobile/v1/album/track/v2",
+            query = mapOf(
+                "albumId" to number,
+                "pageId" to page.toString(),
+                "pageSize" to pageSize.toString(),
+                "isAsc" to ascending.toString(),
+                "device" to "android",
+                "isQueryInvitationBrand" to "true",
+            ),
+        )
+        val data = payload.optJSONObject("data")
+            ?: throw XmlyException("invalid_catalogue", "专辑列表无效")
+        val total = total(data.opt("totalCount"), "专辑分页总数无效")
+        val list = data.optJSONArray("list") ?: throw XmlyException("invalid_catalogue", "专辑列表无效")
+        if (data.has("pageId") && total(data.opt("pageId"), "专辑分页无效") != page) {
+            throw XmlyException("invalid_catalogue", "专辑分页无效")
+        }
+        if (data.has("pageSize") && total(data.opt("pageSize"), "专辑分页无效") != pageSize) {
+            throw XmlyException("invalid_catalogue", "专辑分页无效")
+        }
+        val expected = (total - (page - 1) * pageSize).coerceIn(0, pageSize)
+        if (list.length() > pageSize || list.length() != expected) {
+            throw XmlyException("incomplete_catalogue", "专辑分页不完整，请刷新重试")
+        }
+        payload.optJSONObject("album")?.opt("albumId")?.let {
+            if (xmlyIdentifier(it.toString()) != number) {
+                throw XmlyException("id_mismatch", "专辑信息不匹配")
+            }
+        }
+        data.opt("albumId")?.let {
+            if (xmlyIdentifier(it.toString()) != number) throw XmlyException("id_mismatch", "专辑信息不匹配")
+        }
+        val seen = mutableSetOf<String>()
+        var previousOrder: Int? = null
+        val tracks = mutableListOf<Track>()
+        for (index in 0 until list.length()) {
+            val raw = list.optJSONObject(index) as? JSONObject
+                ?: throw XmlyException("invalid_catalogue", "专辑声音信息无效")
+            val map = raw.toPlainMap()
+            for (key in listOf("albumId", "album_id")) {
+                val value = map[key] ?: continue
+                if (xmlyIdentifier(value.toString()) != number) {
+                    throw XmlyException("id_mismatch", "专辑包含其他专辑的声音")
+                }
+            }
+            val id = xmlyIdentifier((map["trackId"] ?: map["id"] ?: "").toString())
+            if (!seen.add(id)) throw XmlyException("duplicate_page", "专辑声音重复，请刷新重试")
+            val order = albumOrder(map)
+            if (order != null) {
+                val monotonic = previousOrder?.let { if (ascending) order > it else order < it } ?: true
+                if (!monotonic) throw XmlyException("invalid_catalogue", "专辑声音序号冲突")
+                previousOrder = order
+            }
+            val position = (page - 1) * pageSize + index + 1
+            val official = if (ascending) position else if (total > 0) total - position + 1 else null
+            trackFromApi(map, albumId = number, officialPosition = official)?.let(tracks::add)
+        }
+        val album = albumFromApi(payload.optJSONObject("album")?.toPlainMap() ?: emptyMap(), number, total)
+        albums[number] = album
+        while (albums.size > 512) albums.remove(albums.keys.first())
+        for (track in tracks) metadata[track.number] = track
+        return AlbumPage(album, tracks, page, pageSize, total)
+    }
+
+    // -------------------------------------------------------------------- track
+
+    fun track(number: String): Track {
+        val id = xmlyIdentifier(number)
+        val payload = http.get(
+            mobile,
+            "/fmobile-track/fmobile/track/v2/baseInfo",
+            query = mapOf("device" to "android", "trackId" to id),
+            credentials = credentials,
+            signed = credentials != null,
+            readOnly = true,
+        )
+        val data = payload.optJSONObject("data") ?: throw XmlyException("missing_track", "声音信息缺失")
+        val map = data.toPlainMap()
+        val returned = (map["trackId"] ?: map["id"] ?: "").toString()
+        if (returned.isNotEmpty() && xmlyIdentifier(returned) != id) {
+            throw XmlyException("id_mismatch", "声音信息不匹配")
+        }
+        return trackFromApi(map) ?: throw XmlyException("missing_track", "声音信息缺失")
+    }
+
+    // ------------------------------------------------------------------ billing
+
+    override fun quota(identity: String): Quota = activity("config", null)
+
+    override fun debit(identity: String, seconds: Int, operationId: String): Quota {
+        if (seconds < 1) throw XmlyException("invalid_duration", "听时必须为正整数秒", definitive = true)
+        return activity("report", seconds)
+    }
+
+    private fun activity(name: String, seconds: Int?): Quota {
+        val account = credentials ?: throw XmlyException("login_required", "请先登录", definitive = true)
+        val params = linkedMapOf(
+            "deviceId" to account.deviceId,
+            "timestamp" to clock().toEpochMilli().toString(),
+            "uid" to account.uid,
+        )
+        seconds?.let { params["duration"] = it.toString() }
+        val signature = XmlyCrypto.activitySignature(params)
+        val form = linkedMapOf<String, String>()
+        params.forEach { (key, value) -> if (key != "uid") form[key] = value }
+        form["signature"] = signature
+        val payload = http.postForm(
+            mobile,
+            "/lite-mobile/audi/func/v1/$name",
+            form = form,
+            credentials = account,
+            readOnly = name == "config",
+            responseLimit = XmlyHttp.MAX_RESPONSE_BYTES,
+        )
+        val data = payload.optJSONObject("data") ?: throw XmlyException("invalid_quota", "听时信息缺失或已过期")
+        fun decode(field: String): String {
+            val raw = data.opt(field) as? String ?: throw XmlyException("invalid_quota", "听时信息缺失或已过期")
+            return try {
+                val plain = XmlyCrypto.decrypt(raw, XmlyCrypto.durationKey)
+                val divider = plain.lastIndexOf('|')
+                if (divider < 0) throw IllegalArgumentException("no divider")
+                val stamp = plain.substring(divider + 1).toLong()
+                if (kotlin.math.abs(clock().toEpochMilli() - stamp) >= 180_000) {
+                    throw IllegalArgumentException("stale")
+                }
+                plain.substring(0, divider)
+            } catch (_: Exception) {
+                throw XmlyException("invalid_quota", "听时信息缺失或已过期")
+            }
+        }
+        var newDevice = false
+        if (name == "config") {
+            val flag = decode("newDevice")
+            if (flag != "true" && flag != "false") throw XmlyException("invalid_quota", "设备授权信息无效")
+            newDevice = flag == "true"
+        }
+        val remaining = if (newDevice && !data.has("availableListenDuration")) 0 else decode("availableListenDuration").toIntOrNull()
+        if (remaining == null || remaining < 0) throw XmlyException("invalid_quota", "听时余额无效")
+        return Quota(remaining, newDevice, clock())
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private fun paging(page: Int, pageSize: Int, maxPageSize: Int = 50) {
+        if (page < 1 || page > 10000 || pageSize < 1 || pageSize > maxPageSize) {
+            throw XmlyException("invalid_page", "页码范围为 1..10000，每页 1..$maxPageSize", definitive = true)
+        }
+    }
+
+    private fun total(value: Any?, message: String): Int {
+        val number = when (value) {
+            is Number -> value.toDouble()
+            is String -> value.toDoubleOrNull()
+            else -> null
+        } ?: throw XmlyException("invalid_page", message)
+        if (!number.isFinite() || number < 0 || number != kotlin.math.floor(number)) {
+            throw XmlyException("invalid_page", message)
+        }
+        return number.toInt()
+    }
+
+    private fun albumOrder(raw: Map<String, Any?>): Int? {
+        var order: Int? = null
+        for (key in listOf("orderNo", "orderNum", "order_no")) {
+            val value = xmlyPositive(raw[key]) ?: continue
+            if (order != null && order != value) throw XmlyException("invalid_catalogue", "专辑声音序号冲突")
+            order = value
+        }
+        return order
+    }
+
+    private fun albumFromApi(raw: Map<String, Any?>, id: String, total: Int = 0): Album = Album(
+        rawId = id,
+        title = (raw["albumTitle"] ?: raw["album_title"] ?: raw["title"] ?: "").toString(),
+        artist = (raw["nickname"] ?: raw["artist"] ?: "").toString(),
+        intro = (raw["intro"] ?: "").toString(),
+        coverUrl = coverUrl(raw),
+        total = total,
+        raw = publicRaw(raw),
+    )
+
+    private fun trackFromApi(
+        raw: Map<String, Any?>,
+        albumId: String = "",
+        officialPosition: Int? = null,
+    ): Track? {
+        val id = (raw["trackId"] ?: raw["id"] ?: "").toString()
+        if (id.isEmpty()) return null
+        val rawMap = LinkedHashMap<String, Any?>(raw)
+        if (officialPosition != null) rawMap["officialPosition"] = officialPosition
+        val resolvedAlbum = albumId.ifEmpty { (raw["albumId"] ?: raw["album_id"] ?: "").toString() }
+        return Track(
+            rawId = id,
+            title = (raw["title"] ?: "").toString(),
+            artist = (raw["nickname"] ?: "").toString(),
+            album = (raw["albumTitle"] ?: raw["album_title"] ?: "").toString(),
+            albumId = resolvedAlbum,
+            duration = (raw["duration"] as? Number)?.toDouble() ?: 0.0,
+            orderNo = xmlyPositive(raw["orderNo"] ?: raw["orderNum"] ?: raw["order_no"]),
+            episode = xmlyPositive(raw["episode"]),
+            isPaid = raw["isPaid"] as? Boolean ?: raw["is_paid"] as? Boolean,
+            isAuthorized = raw["isAuthorized"] as? Boolean,
+            coverUrl = coverUrl(raw),
+            intro = (raw["intro"] ?: "").toString(),
+            raw = publicRaw(rawMap),
+        ).also { metadata[it.number] = it }
+    }
+
+    companion object {
+        const val MOBILE = "https://mobile.ximalaya.com"
+        const val ANONYMOUS = "anonymous"
+    }
+}
+
+/** Converts the JSON tree into plain maps so the model layer stays JSON free. */
+internal fun JSONObject.toPlainMap(): Map<String, Any?> =
+    keys().asSequence().associateWith { key ->
+        when (val value = opt(key)) {
+            JSONObject.NULL -> null
+            is JSONObject -> value.toPlainMap()
+            is JSONArray -> (0 until value.length()).map { value.opt(it) }
+            else -> value
+        }
+    }
