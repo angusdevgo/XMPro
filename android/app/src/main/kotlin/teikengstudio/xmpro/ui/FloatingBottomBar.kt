@@ -85,7 +85,7 @@ fun FloatingBottomBar(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -132,7 +132,7 @@ fun FloatingBottomBar(
                     val selected = index == selectedIndex
                     Box(
                         modifier = Modifier
-                            .width(64.dp)
+                            .width(84.dp)
                             .height(64.dp)
                             .onGloballyPositioned { coordinates ->
                                 val width = coordinates.size.width.toFloat()
