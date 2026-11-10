@@ -109,6 +109,9 @@ dependencies {
 
     testImplementation("org.jetbrains.kotlin:kotlin-test:2.0.20")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.0")
+    // Android supplies org.json at runtime; unit tests need a JVM implementation.
+    testImplementation("org.json:json:20240303")
 }
 
 // Native media tools are built by tool/build_android_media.sh. Local debug
