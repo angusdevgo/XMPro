@@ -123,6 +123,7 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
             }
         }
         viewModelScope.launch { autoClaimLoop() }
+        if (initialAccounts.isNotEmpty()) syncProfiles()
     }
 
     // -------------------------------------------------------------------- home
@@ -596,6 +597,36 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
         }
     }
 
+    /** Pulls nickname/avatar for every stored account; silent unless manual. */
+    fun syncProfiles(manual: Boolean = false) {
+        viewModelScope.launch {
+            val accounts = container.accounts()
+            var failure: String? = null
+            for (account in accounts) {
+                runCatching { withContext(Dispatchers.IO) { container.refreshProfile(account.identity) } }
+                    .onFailure { failure = it.message }
+            }
+            val refreshed = container.accounts()
+            val named = refreshed.any { it.nickname.isNotEmpty() }
+            _state.update {
+                it.copy(
+                    accounts = refreshed,
+                    message = when {
+                        !manual -> it.message
+                        named -> "已同步账号资料"
+                        else -> failure ?: "该账号没有可同步的公开资料"
+                    },
+                )
+            }
+        }
+    }
+
+    fun renameAccount(identity: String, nickname: String) {
+        runCatching { container.renameAccount(identity, nickname) }
+            .onSuccess { _state.update { it.copy(accounts = container.accounts(), message = "已更新账号名") } }
+            .onFailure { error -> _state.update { it.copy(message = describe(error)) } }
+    }
+
     fun refreshAccounts() {
         val list = container.accounts()
         _state.update {
@@ -691,6 +722,7 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                 }
                 refreshListening()
                 loadHome()
+                syncProfiles()
                 onResult(null)
             } catch (error: Exception) {
                 onResult(describe(error))

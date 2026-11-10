@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -165,21 +166,24 @@ private fun UpdatesTab(
         if (state.subscriptions.isNotEmpty()) {
             item {
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(state.subscriptions.take(20), key = { it.album.id }) { item ->
                         Column(
-                            Modifier.clickable { onOpenAlbum(item.album.id) },
+                            Modifier
+                                .width(72.dp)
+                                .clickable { onOpenAlbum(item.album.id) },
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Cover(item.album.coverUrl, 64)
                             Text(
                                 item.album.title,
                                 style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(top = 6.dp),
                             )
                         }
                     }

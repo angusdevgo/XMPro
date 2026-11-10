@@ -59,16 +59,19 @@ class XmlyClient(
         json: Map<String, Any?>? = null,
         account: Boolean = true,
         readOnly: Boolean = true,
+        signed: Boolean = false,
+        headers: Map<String, String> = emptyMap(),
     ): JSONObject {
         val bound = if (account) credentials else null
         if (account && bound == null) {
             throw XmlyException("login_required", "请先登录", definitive = true)
         }
-        val headers = if (origin == COLLECTOR) {
-            mapOf("User-Agent" to "ting_3.4.10.3(Android,30)", "Accept" to "*/*")
-        } else {
-            emptyMap()
+        val merged = LinkedHashMap<String, String>()
+        if (origin == COLLECTOR) {
+            merged["User-Agent"] = "ting_3.4.10.3(Android,30)"
+            merged["Accept"] = "*/*"
         }
+        merged.putAll(headers)
         val limit = if (origin == COLLECTOR) 8 * 1024 * 1024 else XmlyHttp.MAX_RESPONSE_BYTES
         return when {
             method == "GET" -> http.get(
@@ -76,8 +79,9 @@ class XmlyClient(
                 path = path,
                 query = query,
                 credentials = bound,
+                signed = signed,
                 readOnly = readOnly,
-                headers = headers,
+                headers = merged,
                 responseLimit = limit,
             )
 
@@ -99,6 +103,16 @@ class XmlyClient(
                 readOnly = readOnly,
             )
         }
+    }
+
+    /**
+     * Cookie shaped for the main-app user endpoints. The lite cookie is
+     * answered with an empty 404 by the mobile-user routes.
+     */
+    fun mainAppCookie(): String? {
+        val account = credentials ?: return null
+        return "1&_token=${account.token}; 1&_device=android&${account.deviceId}&9.5.1; " +
+            "channel=and-d10; impl=com.ximalaya.ting.android; appid=1463"
     }
 
     /** Account identity fields required by the history signature. */

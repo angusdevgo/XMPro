@@ -21,6 +21,8 @@ class AccountSummary(
     val primary: Boolean,
     val active: Boolean,
     val quotaRejected: Boolean = false,
+    val nickname: String = "",
+    val avatarUrl: String? = null,
 ) {
     val balance: Quota? = quota?.let {
         runCatching {

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.core.content.edit
 import teikengstudio.xmpro.api.XmlyClient
 import teikengstudio.xmpro.api.XmlyHttp
+import teikengstudio.xmpro.api.XmlyExperience
 import teikengstudio.xmpro.api.XmlyRewards
 import teikengstudio.xmpro.model.Credentials
 import teikengstudio.xmpro.model.Quota
@@ -103,6 +104,7 @@ class AppContainer(context: Context) {
             state.put("activeAccountId", activeAccount)
         }
         ledger.recover(parsed.identity)
+        runCatching { refreshProfile(parsed.identity) }
         return parsed.identity
     }
 
@@ -126,6 +128,8 @@ class AppContainer(context: Context) {
                     primary = identity == primary,
                     active = identity == active,
                     quotaRejected = record.optBoolean("quotaError", false),
+                    nickname = record.optString("localName").ifEmpty { record.optString("nickname") },
+                    avatarUrl = record.optString("avatar").takeIf { it.isNotEmpty() },
                 )
             }
             .sortedWith(compareByDescending<AccountSummary> { it.primary }.thenByDescending { it.active })
@@ -157,6 +161,26 @@ class AppContainer(context: Context) {
                 if (activeAccount == null) activeAccount = next
                 state.put("activeAccountId", activeAccount ?: org.json.JSONObject.NULL)
             }
+        }
+    }
+
+    /** Fetches the account nickname/avatar and caches it in state.json. */
+    fun refreshProfile(identity: String): teikengstudio.xmpro.model.UserProfile {
+        val client = client(identity)
+        val profile = XmlyExperience(client).profile()
+        store.transaction { state ->
+            val record = state.optJSONObject("accounts")?.optJSONObject(identity) ?: return@transaction
+            if (profile.nickname.isNotEmpty()) record.put("nickname", profile.nickname)
+            profile.avatarUrl?.let { record.put("avatar", it) }
+            if (profile.intro.isNotEmpty()) record.put("intro", profile.intro)
+        }
+        return profile
+    }
+
+    /** Local alias used when the official profile cannot be read. */
+    fun renameAccount(identity: String, nickname: String) {
+        store.transaction { state ->
+            state.optJSONObject("accounts")?.optJSONObject(identity)?.put("localName", nickname.trim())
         }
     }
 

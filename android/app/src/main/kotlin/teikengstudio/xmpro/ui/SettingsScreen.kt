@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
@@ -80,11 +81,14 @@ fun SettingsScreen(
     onClaimOnce: (String) -> Unit,
     onResumeRewards: (String) -> Unit,
     onAutoClaim: (Boolean) -> Unit,
+    onSyncProfile: () -> Unit,
+    onRenameAccount: (String, String) -> Unit,
     smsLogin: SmsLoginCallbacks,
 ) {
     var page by remember { mutableStateOf(SettingsPage.Root) }
     var showCookie by remember { mutableStateOf(false) }
     var showSms by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<String?>(null) }
     val current = state.accounts.firstOrNull { it.active }
         ?: state.accounts.firstOrNull { it.primary }
         ?: state.accounts.firstOrNull()
@@ -112,6 +116,8 @@ fun SettingsScreen(
                         onClaimOnce = onClaimOnce,
                         onResumeRewards = onResumeRewards,
                         onAutoClaim = onAutoClaim,
+                        onSyncProfile = onSyncProfile,
+                        onRename = { renameTarget = it },
                         onAddCookie = { showCookie = true },
                         onAddSms = { showSms = true },
                     )
@@ -167,6 +173,16 @@ fun SettingsScreen(
         }
     }
 
+    renameTarget?.let { identity ->
+        RenameDialog(
+            initial = state.accounts.firstOrNull { it.identity == identity }?.nickname ?: "",
+            onDismiss = { renameTarget = null },
+            onConfirm = {
+                onRenameAccount(identity, it)
+                renameTarget = null
+            },
+        )
+    }
     if (showCookie) {
         CookieDialog(
             onDismiss = { showCookie = false },
@@ -207,7 +223,7 @@ private fun SettingsRoot(
         )
         SettingsRow(
             title = "账号",
-            subtitle = current?.let { "账号 ${it.uid}${if (it.primary) " · 主账号" else ""}" } ?: "未登录",
+            subtitle = current?.let { it.nickname.ifEmpty { "账号 ${it.uid}" } + if (it.primary) " · 主账号" else "" } ?: "未登录",
             icon = Icons.Filled.Person,
             onClick = { onNavigate(SettingsPage.Account) },
         )
@@ -236,7 +252,7 @@ private fun SettingsRow(
 ) {
     ListItem(
         headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
-        supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall) },
+        supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingContent = {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         },
@@ -275,6 +291,8 @@ private fun AccountContent(
     onClaimOnce: (String) -> Unit,
     onResumeRewards: (String) -> Unit,
     onAutoClaim: (Boolean) -> Unit,
+    onSyncProfile: () -> Unit,
+    onRename: (String) -> Unit,
     onAddCookie: () -> Unit,
     onAddSms: () -> Unit,
 ) {
@@ -305,6 +323,16 @@ private fun AccountContent(
         }
     }
     SectionHeader("账号管理")
+    ActionRow(
+        title = "修改账号名",
+        subtitle = "同步失败时可自定义显示名称",
+        onClick = { onRename(current.identity) },
+    )
+    ActionRow(
+        title = "同步账号资料",
+        subtitle = "从喜马拉雅拉取昵称与头像",
+        onClick = onSyncProfile,
+    )
     ActionRow(
         title = "添加 Cookie 账号",
         subtitle = "粘贴极速版 Cookie 或登录信息 JSON",
@@ -407,16 +435,31 @@ private fun ProfileCard(
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        account.uid.take(1).ifEmpty { "我" },
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
+                    val avatar = account.avatarUrl
+                    if (avatar != null) {
+                        coil.compose.AsyncImage(
+                            model = avatar,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        )
+                    } else {
+                        Text(
+                            (account.nickname.take(1).ifEmpty { account.uid.take(1) }).ifEmpty { "我" },
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
                 }
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                    Text(account.uid, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "设备 ${account.deviceHint}" + if (account.primary) " · 主账号" else "",
+                        account.nickname.ifEmpty { "喜马拉雅账号" },
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "UID ${account.uid}" + if (account.primary) " · 主账号" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
@@ -510,7 +553,7 @@ private fun ActionRow(
 ) {
     ListItem(
         headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall) },
+        supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         trailingContent = {
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -591,6 +634,32 @@ private fun AccountCard(
             }
         }
     }
+}
+
+@Composable
+private fun RenameDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("修改账号名") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it.take(24) },
+                label = { Text("显示名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text.trim()) }, enabled = text.isNotBlank()) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable

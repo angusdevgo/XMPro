@@ -312,6 +312,41 @@ class XmlyExperience(private val client: XmlyClient) {
         if (integer(payload.opt("ret")) != 0) throw invalid
     }
 
+    /**
+     * Signed-in profile (nickname, avatar); `/mobile-user/user/detail` requires
+     * the account cookie, so this is only called for a stored account.
+     */
+    fun profile(): teikengstudio.xmpro.model.UserProfile {
+        requireAccount()
+        val uid = client.context()["uid"] ?: throw invalid
+        val response = client.request(
+            "GET",
+            XmlyClient.MOBILE,
+            "/mobile-user/user/detail",
+            query = mapOf("uid" to uid, "device" to "android"),
+            headers = buildMap {
+                put("User-Agent", "ting_9.5.1(M2102J2SC,Android31)")
+                client.mainAppCookie()?.let { put("Cookie", it) }
+            },
+        )
+        val data = response.optJSONObject("data")
+            ?: response.optJSONObject("user")
+            ?: throw XmlyException("profile_unavailable", "账号资料不可用")
+        fun text(vararg keys: String): String {
+            for (key in keys) {
+                val value = data.opt(key) as? String
+                if (!value.isNullOrBlank()) return value
+            }
+            return ""
+        }
+        return teikengstudio.xmpro.model.UserProfile(
+            uid = uid,
+            nickname = text("nickname", "userName", "name"),
+            avatarUrl = text("avatar", "avatarUrl", "smallLogo", "logoPic").takeIf { it.isNotEmpty() },
+            intro = text("personalSignature", "intro", "description"),
+        )
+    }
+
     private fun get(path: String, query: Map<String, String>): JSONObject {
         val payload = if (client.credentials != null) {
             client.request("GET", XmlyClient.MOBILE, path, query = query)

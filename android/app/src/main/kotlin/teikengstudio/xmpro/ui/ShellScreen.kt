@@ -141,6 +141,8 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                     onClaimOnce = viewModel::claimOnce,
                     onResumeRewards = viewModel::resumeRewards,
                     onAutoClaim = viewModel::setAutoClaim,
+                    onSyncProfile = { viewModel.syncProfiles(manual = true) },
+                    onRenameAccount = viewModel::renameAccount,
                     smsLogin = remember(viewModel) {
                         SmsLoginCallbacks(
                             captchaId = viewModel.geetestConfig()["captcha_id"] as String,
