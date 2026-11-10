@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -61,8 +62,8 @@ fun FloatingBottomBar(
     selectedIndex: Int,
     onItemSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    /** null draws no backplate: the bar floats directly over the content. */
-    containerColor: Color? = null,
+    /** Capsule backplate; pass null for a fully transparent bar. */
+    containerColor: Color? = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
     indicatorColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
 ) {
     val density = LocalDensity.current
@@ -84,12 +85,13 @@ fun FloatingBottomBar(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 24.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
                 .height(64.dp)
+                .padding(horizontal = 6.dp)
                 .then(
                     if (containerColor == null) {
                         Modifier
@@ -122,16 +124,16 @@ fun FloatingBottomBar(
                 )
             }
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround,
+                modifier = Modifier.height(64.dp),
+                horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 items.forEachIndexed { index, item ->
                     val selected = index == selectedIndex
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
+                            .width(64.dp)
+                            .height(64.dp)
                             .onGloballyPositioned { coordinates ->
                                 val width = coordinates.size.width.toFloat()
                                 val indicatorWidth = width * 0.82f
