@@ -20,6 +20,7 @@ class AccountSummary(
     val paused: Boolean,
     val primary: Boolean,
     val active: Boolean,
+    val quotaRejected: Boolean = false,
 ) {
     val balance: Quota? = quota?.let {
         runCatching {

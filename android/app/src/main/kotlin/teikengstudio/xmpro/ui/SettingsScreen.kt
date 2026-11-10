@@ -207,6 +207,12 @@ private fun AccountCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            } else if (account.quotaRejected) {
+                Text(
+                    "听时核验被服务端拒绝，可点「查询听时」重试；播放与下载仍会校验余额。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (account.paused) {
                 Text(

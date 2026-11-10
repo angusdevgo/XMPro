@@ -75,9 +75,14 @@ class AppContainer(context: Context) {
 
     fun signIn(input: String): String = signIn(Credentials.parse(input), makePrimary = true)
 
-    /** Validates the listening balance, then stores the account without secrets. */
+    /**
+     * Stores the account without secrets.
+     *
+     * The balance read is advisory: a rejected or unreachable quota call must
+     * not lock a valid login out, so it is recorded as unverified instead.
+     */
     fun signIn(parsed: Credentials, makePrimary: Boolean): String {
-        val quota = client(parsed).quota(parsed.identity)
+        val quota = runCatching { client(parsed).quota(parsed.identity) }.getOrNull()
         credentials.save(parsed)
         if (makePrimary || activeAccount == null) activeAccount = parsed.identity
         store.transaction { state ->
@@ -86,7 +91,13 @@ class AppContainer(context: Context) {
             val record = accounts.optJSONObject(parsed.identity) ?: org.json.JSONObject()
             record.put("uid", parsed.uid)
             record.put("deviceHint", hint(parsed.deviceId))
-            record.put("quota", quota.toJson())
+            if (quota != null) {
+                record.put("quota", quota.toJson())
+                record.remove("quotaError")
+            } else {
+                record.remove("quota")
+                record.put("quotaError", true)
+            }
             record.put("rewardPaused", false)
             record.put("archived", false)
             if (!record.has("ledger")) record.put("ledger", org.json.JSONObject())
@@ -119,6 +130,7 @@ class AppContainer(context: Context) {
                     paused = record.optBoolean("rewardPaused", false),
                     primary = identity == primary,
                     active = identity == active,
+                    quotaRejected = record.optBoolean("quotaError", false),
                 )
             }
             .sortedWith(compareByDescending<AccountSummary> { it.primary }.thenByDescending { it.active })

@@ -256,7 +256,9 @@ class XmlyHttp(
                     definitive = true,
                 )
             }
-            throw XmlyException("rejected", "喜马拉雅拒绝了请求", definitive = true)
+            // The business code is included so a failure can be matched against
+            // the official client instead of guessing.
+            throw XmlyException("rejected", "喜马拉雅拒绝了请求（ret=$code）", definitive = true)
         }
         return payload
     }
