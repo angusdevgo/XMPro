@@ -41,7 +41,7 @@ jobs:
           path: android/app/src/main/jniLibs/
           merge-multiple: true
       - name: Compile and unit test (debug, never published)
-        run: ./android/gradlew -p android :app:assembleDebug :app:testDebugUnitTest -Pxmpro.requireNativeTools=true
+        run: sh android/gradlew -p android :app:assembleDebug :app:testDebugUnitTest -Pxmpro.requireNativeTools=true
 
   signed:
     needs: native-tools
@@ -108,7 +108,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: ./android/gradlew -p android :app:assembleRelease -Pxmpro.requireNativeTools=true
+        run: sh android/gradlew -p android :app:assembleRelease -Pxmpro.requireNativeTools=true
       - name: Verify APK signature, package and version
         env:
           APP_VERSION: ${{ steps.version.outputs.version }}
