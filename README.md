@@ -63,6 +63,6 @@ export ANDROID_KEY_PASSWORD=...
 ## 🤝 Acknowledgements & License
 
 -开源协议：**AGPL-3.0-or-later** 
--特别致谢开源项目： [XMPlus](https://github.com/teikengstudio/XMPlus) 
--特别致谢开源项目：[sld272/Ximalaya-Downloader-Next](https://github.com/sld272/Ximalaya-Downloader-Next)
+-特别致谢开源项目： [**XMPlus**](https://github.com/teikengstudio/XMPlus) 
+-特别致谢开源项目：[**sld272/Ximalaya-Downloader-Next**](https://github.com/sld272/Ximalaya-Downloader-Next)
 -本项目与喜马拉雅官方无关，仅供个人学习与自用，请使用自己的账号并遵守服务条款。
