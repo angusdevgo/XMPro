@@ -248,12 +248,20 @@ class AppContainer(context: Context) {
             }
             quota
         } catch (error: Exception) {
-            store.transaction { state ->
-                state.optJSONObject("accounts")?.optJSONObject(identity)?.put("rewardPaused", true)
+            // A definitive refusal (daily cap, balance cap) says nothing about the
+            // account being broken, so it must not disable claiming permanently.
+            val definitive = error is XmlyException && error.definitive
+            if (!definitive) {
+                store.transaction { state ->
+                    state.optJSONObject("accounts")?.optJSONObject(identity)?.put("rewardPaused", true)
+                }
             }
             throw error
         }
     }
+
+    /** Welfare task list as plain JSON, for the diagnostics dialog. */
+    fun rewardTasks(identity: String): String = XmlyRewards(client(identity)).taskDiagnostics()
 
     fun resumeRewards(identity: String) {
         store.transaction { state ->

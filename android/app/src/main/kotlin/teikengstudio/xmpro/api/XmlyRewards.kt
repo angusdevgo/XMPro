@@ -35,7 +35,14 @@ class XmlyRewards(
         val success = data.opt("success") as? Boolean
             ?: throw XmlyException("invalid_response", "福利响应缺少明确结果")
         if (!success) {
-            throw XmlyException("reward_rejected", "福利请求未成功，请在官方 App 检查", definitive = true)
+            // The server explains *why* (daily cap, balance cap, expired task);
+            // replacing it with a generic hint hid the only useful information.
+            val reason = listOf(
+                data.optString("msg"),
+                data.optString("message"),
+                response.optString("msg"),
+            ).firstOrNull { it.isNotEmpty() }
+            throw XmlyException("reward_rejected", reason ?: "福利请求未成功，请在官方 App 检查", definitive = true)
         }
         return data
     }
@@ -89,19 +96,55 @@ class XmlyRewards(
         var current = quota()
         lastError = ""
         if (!enabled || current.remainingSeconds >= LOW_WATER) return current
-        for (round in 0 until 64) {
+        for (round in 0 until MAX_CLAIMS) {
             if (!enabled || current.remainingSeconds >= TARGET) break
             val before = current.remainingSeconds
             try {
                 claim()
                 current = quota()
+            } catch (error: XmlyException) {
+                // Report the server's reason verbatim; a cap is not a failure of
+                // the account, so the caller can show it without pausing forever.
+                lastError = error.message ?: "领取听时未完成"
+                break
             } catch (_: Exception) {
-                lastError = "领取听时未完成，已停止自动领取"
+                lastError = "领取听时未完成，请在官方 App 核对"
                 break
             }
             if (current.remainingSeconds <= before) break
         }
         return current
+    }
+
+    /**
+     * Raw welfare task list for the diagnostics view.
+     *
+     * Nothing here is a secret, but the ticket and ad ids are dropped so the
+     * output can be read (or pasted) without leaking a session.
+     */
+    fun taskDiagnostics(): String {
+        val data = tasks().optJSONObject("data") ?: JSONObject()
+        return (scrub(data) as JSONObject).toString(2)
+    }
+
+    private fun scrub(value: Any?): Any? = when (value) {
+        is JSONObject -> JSONObject().apply {
+            for (key in value.keys()) {
+                if (key.contains("ticket", true) || key.contains("token", true) ||
+                    key.contains("verifyStr", true) || key == "signature"
+                ) {
+                    put(key, "***")
+                } else {
+                    put(key, scrub(value.opt(key)))
+                }
+            }
+        }
+
+        is org.json.JSONArray -> org.json.JSONArray().apply {
+            for (index in 0 until value.length()) put(scrub(value.opt(index)))
+        }
+
+        else -> value
     }
 
     private fun normalize(fields: Map<String, Any?>): LinkedHashMap<String, Any?> {
@@ -144,6 +187,8 @@ class XmlyRewards(
         const val LOW_WATER = 7200
         /** It stops once four hours are available. */
         const val TARGET = 14400
+        /** Upper bound on one refill pass, so a stuck balance cannot loop forever. */
+        private const val MAX_CLAIMS = 64
 
         internal fun md5(value: String): String =
             MessageDigest.getInstance("MD5").digest(value.toByteArray(Charsets.UTF_8))

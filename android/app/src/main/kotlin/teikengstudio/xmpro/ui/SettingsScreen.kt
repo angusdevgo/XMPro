@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -103,6 +105,7 @@ fun SettingsScreen(
     onRemoveAccount: (String) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
+    onRewardTasks: (String) -> Unit,
     onResumeRewards: (String) -> Unit,
     onAutoClaim: (Boolean) -> Unit,
     onSyncProfile: () -> Unit,
@@ -142,6 +145,7 @@ fun SettingsScreen(
                 onNavigate = { page = it },
                 onQueryQuota = onQueryQuota,
                 onClaimOnce = onClaimOnce,
+                onRewardTasks = onRewardTasks,
                 onOpenSocial = onOpenSocial,
             )
 
@@ -161,6 +165,7 @@ fun SettingsScreen(
                         onRemoveAccount = onRemoveAccount,
                         onQueryQuota = onQueryQuota,
                         onClaimOnce = onClaimOnce,
+                        onRewardTasks = onRewardTasks,
                         onResumeRewards = onResumeRewards,
                         onAutoClaim = onAutoClaim,
                         onSyncProfile = onSyncProfile,
@@ -387,6 +392,7 @@ private fun SettingsRoot(
     onNavigate: (SettingsPage) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
+    onRewardTasks: (String) -> Unit,
     onOpenSocial: (String) -> Unit,
 ) {
     Column(
@@ -407,6 +413,7 @@ private fun SettingsRoot(
                 account = current,
                 onQueryQuota = onQueryQuota,
                 onClaimOnce = onClaimOnce,
+                onRewardTasks = onRewardTasks,
                 onOpenSocial = onOpenSocial,
             )
         }
@@ -456,6 +463,7 @@ private fun ProfileHeader(
     account: AccountSummary?,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
+    onRewardTasks: (String) -> Unit,
     onOpenSocial: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -570,8 +578,13 @@ private fun ProfileHeader(
                     shape = CircleShape,
                 ) { Text("查询听时") }
                 FilledTonalButton(
+                    onClick = { onRewardTasks(account.identity) },
+                    enabled = !state.accountBusy,
+                    shape = CircleShape,
+                ) { Text("福利任务") }
+                FilledTonalButton(
                     onClick = { onClaimOnce(account.identity) },
-                    enabled = !state.accountBusy && !account.paused,
+                    enabled = !state.accountBusy,
                     shape = CircleShape,
                 ) { Text("领取一次") }
             }
@@ -865,6 +878,7 @@ private fun AccountContent(
     onRemoveAccount: (String) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
+    onRewardTasks: (String) -> Unit,
     onResumeRewards: (String) -> Unit,
     onAutoClaim: (Boolean) -> Unit,
     onSyncProfile: () -> Unit,
@@ -1757,4 +1771,35 @@ private fun AboutPage(
             },
         )
     }
+}
+
+/** Read-only dump of the welfare task payload, for diagnosing claim failures. */
+@Composable
+fun RewardTasksDialog(text: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("福利任务") },
+        text = {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "以下为官方接口返回的原始任务与限额字段，令牌类字段已隐去。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                Text(
+                    text,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }

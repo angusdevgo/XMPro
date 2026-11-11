@@ -74,6 +74,8 @@ data class UiState(
     val listeningError: String? = null,
     val accounts: List<AccountSummary> = emptyList(),
     val autoClaim: Boolean = false,
+    /** Raw welfare task list, shown in the diagnostics dialog. */
+    val rewardTasks: String? = null,
     val accountBusy: Boolean = false,
     /** Playback queue and the index of the track that is loaded. */
     val queue: List<Track> = emptyList(),
@@ -1126,6 +1128,22 @@ class MainViewModel(private val context: Context, private val container: AppCont
     fun queryQuota(identity: String) = accountAction({
         container.refreshQuota(identity)
     }, "听时已更新")
+
+    fun loadRewardTasks(identity: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(accountBusy = true) }
+            try {
+                val text = withContext(Dispatchers.IO) { container.rewardTasks(identity) }
+                _state.update { it.copy(rewardTasks = text) }
+            } catch (error: Exception) {
+                _state.update { it.copy(message = describe(error)) }
+            } finally {
+                _state.update { it.copy(accountBusy = false) }
+            }
+        }
+    }
+
+    fun closeRewardTasks() = _state.update { it.copy(rewardTasks = null) }
 
     fun claimOnce(identity: String) = accountAction({
         container.claimOnce(identity)

@@ -214,6 +214,7 @@ fun ShellScreen(
                         onRemoveAccount = viewModel::removeAccount,
                         onQueryQuota = viewModel::queryQuota,
                         onClaimOnce = viewModel::claimOnce,
+                        onRewardTasks = viewModel::loadRewardTasks,
                         onResumeRewards = viewModel::resumeRewards,
                         onAutoClaim = viewModel::setAutoClaim,
                         onSyncProfile = { viewModel.syncProfiles(manual = true) },
@@ -338,6 +339,10 @@ fun ShellScreen(
                     onSkipTrim = viewModel::setSkipTrim,
                 )
             }
+        }
+
+        state.rewardTasks?.let { text ->
+            RewardTasksDialog(text = text, onDismiss = viewModel::closeRewardTasks)
         }
 
         // The now-playing page owns the screen: the mini player and the nav pill
