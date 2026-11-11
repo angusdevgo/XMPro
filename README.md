@@ -60,11 +60,9 @@ export ANDROID_KEY_PASSWORD=...
 
 推送到 `v*` 标签时，CI 会用仓库 secrets 签名、校验签名与版本号，并把产物发布到 Releases。
 
-## 许可
+## 🤝 Acknowledgements & License
 
-以 **AGPL-3.0-or-later** 发布，见 [LICENSE](LICENSE)；它等于 GPL-3.0 的全部条款加第 13 条「网络提供」。
-本项目是 [XMPlus](https://github.com/teikengstudio/XMPlus) 的修改版，登录相关实现参考了
-[sld272/Ximalaya-Downloader-Next](https://github.com/sld272/Ximalaya-Downloader-Next)（三者同为 AGPL-3.0-or-later）。
-分发或改造时请保留同样的许可并提供对应源码。
-
+开源协议：**AGPL-3.0-or-later** 
+特别致谢开源项目： [XMPlus](https://github.com/teikengstudio/XMPlus) 
+特别致谢开源项目：[sld272/Ximalaya-Downloader-Next](https://github.com/sld272/Ximalaya-Downloader-Next)
 本项目与喜马拉雅官方无关，仅供个人学习与自用，请使用自己的账号并遵守服务条款。
