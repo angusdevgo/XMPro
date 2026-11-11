@@ -537,6 +537,26 @@ private fun ProfileHeader(
                     modifier = Modifier.padding(top = 3.dp),
                 )
             }
+            if (account != null && state.accounts.size > 1) {
+                FilledTonalButton(
+                    onClick = { switchOpen = true },
+                    enabled = !state.accountBusy,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.SwapHoriz,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    Text(
+                        "切换",
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            }
         }
 
         Row(
@@ -610,21 +630,6 @@ private fun ProfileHeader(
                     contentPadding = PaddingValues(horizontal = 4.dp),
                     modifier = Modifier.weight(1f),
                 ) { Text("领取一次", maxLines = 1, softWrap = false) }
-            }
-            if (state.accounts.size > 1) {
-                OutlinedButton(
-                    onClick = { switchOpen = true },
-                    enabled = !state.accountBusy,
-                    shape = CircleShape,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.SwapHoriz,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text("切换账号", modifier = Modifier.padding(start = 6.dp), maxLines = 1)
-                }
             }
         }
     }
