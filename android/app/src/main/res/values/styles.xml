@@ -1,15 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+    <!-- A modern Material theme, not the legacy Theme.Light.NoTitleBar: on
+         Android 15 the legacy theme keeps the window out of the status bar strip
+         and that strip then renders flat black with no clock or icons. -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
-        <!-- Edge-to-edge: the window owns the whole screen, so the bars are
-             painted by the app instead of the system. -->
-        <item name="android:statusBarColor">@color/window_background</item>
-        <item name="android:navigationBarColor">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
-        <!-- Without shortEdges the system letterboxes the window below a notch
-             in portrait, which shows up as a black band on real phones. -->
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="28">shortEdges</item>
     </style>
 </resources>
