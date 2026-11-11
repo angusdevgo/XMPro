@@ -329,6 +329,7 @@ fun ShellScreen(
                         playerOpen = false
                         viewModel.openAlbum(albumId)
                     },
+                    onSkipTrim = viewModel::setSkipTrim,
                 )
             }
         }

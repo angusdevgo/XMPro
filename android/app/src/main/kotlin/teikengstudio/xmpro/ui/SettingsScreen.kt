@@ -189,7 +189,7 @@ fun SettingsScreen(
                     }
                     SettingsGroup {
                         SettingSwitchRow(
-                            title = "跳过片头片尾",
+                            title = "跳过头尾",
                             subtitle = "按比例裁掉开头与结尾，不同长度的声音都适用",
                             checked = state.skipTrimEnabled,
                             onCheckedChange = { onSkipTrim(it, state.introSkipPermille, state.outroSkipPermille) },
@@ -395,7 +395,7 @@ private fun SettingsRoot(
             GroupDivider()
             SettingsRow(
                 title = "播放设置",
-                subtitle = "音质 · 跳过片头片尾",
+                subtitle = "音质 · 跳过头尾",
                 icon = Icons.Filled.PlayCircleOutline,
                 onClick = { onNavigate(SettingsPage.Playback) },
             )

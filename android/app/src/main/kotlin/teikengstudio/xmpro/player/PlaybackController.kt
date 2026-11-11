@@ -82,14 +82,31 @@ class PlaybackController(private val context: Context) {
         controller = null
     }
 
-    fun start(url: String, title: String, onStarted: () -> Unit) {
+    /**
+     * [startPositionMs] is applied while the item is queued. Seeking right
+     * after prepare() is dropped by ExoPlayer because the player is still
+     * buffering, which left the intro trim silently ignored.
+     */
+    fun start(
+        url: String,
+        title: String,
+        startPositionMs: Long = 0,
+        onStarted: () -> Unit,
+    ) {
         playbackStarted = onStarted
         withController { media ->
             _error.value = null
-            media.setMediaItem(mediaItemFor(url))
+            media.setMediaItem(mediaItemFor(url), startPositionMs.coerceAtLeast(0))
             media.prepare()
             media.play()
-            _state.update { it.copy(title = title, playing = true, positionMs = 0, durationMs = 0) }
+            _state.update {
+                it.copy(
+                    title = title,
+                    playing = true,
+                    positionMs = startPositionMs.coerceAtLeast(0),
+                    durationMs = 0,
+                )
+            }
             playbackStarted?.invoke()
             playbackStarted = null
         }

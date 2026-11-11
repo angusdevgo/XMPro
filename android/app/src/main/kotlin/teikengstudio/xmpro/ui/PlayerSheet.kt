@@ -2,6 +2,7 @@ package teikengstudio.xmpro.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
@@ -54,12 +56,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import teikengstudio.xmpro.model.Track
 
 /**
@@ -84,15 +88,22 @@ fun PlayerSheet(
     onSleepTimer: (Int?) -> Unit,
     onSelectQueue: (Int) -> Unit,
     onOpenAlbum: (String) -> Unit = {},
+    onSkipTrim: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
 ) {
     val track = state.playing
     var queueOpen by remember { mutableStateOf(false) }
     var timerOpen by remember { mutableStateOf(false) }
+    var trimOpen by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableFloatStateOf(-1f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     BackHandler {
-        if (queueOpen) queueOpen = false else if (timerOpen) timerOpen = false else onDismiss()
+        when {
+            queueOpen -> queueOpen = false
+            timerOpen -> timerOpen = false
+            trimOpen -> trimOpen = false
+            else -> onDismiss()
+        }
     }
 
     Box(
@@ -223,6 +234,33 @@ fun PlayerSheet(
                     },
                     enabled = true,
                     onClick = { timerOpen = true },
+                )
+                // Tap toggles the trim, long press opens the sliders for it.
+                PlayerActionIcon(
+                    icon = if (state.skipTrimEnabled) {
+                        Icons.Filled.TaskAlt
+                    } else {
+                        Icons.Filled.SkipNext
+                    },
+                    label = "跳过头尾",
+                    tint = if (state.skipTrimEnabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    enabled = track != null,
+                    onClick = {
+                        val turningOn = !state.skipTrimEnabled
+                        onSkipTrim(
+                            turningOn,
+                            state.introSkipPermille,
+                            state.outroSkipPermille,
+                        )
+                        // Switching on also opens the sliders, so the trim can
+                        // be adjusted straight away instead of hunting for it
+                        // in settings.
+                        if (turningOn) trimOpen = true
+                    },
                 )
             }
 
@@ -402,6 +440,20 @@ fun PlayerSheet(
         }
     }
 
+    if (trimOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { trimOpen = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            TrimSheet(
+                enabled = state.skipTrimEnabled,
+                intro = state.introSkipPermille,
+                outro = state.outroSkipPermille,
+                onChange = { on, head, tail -> onSkipTrim(on, head, tail) },
+            )
+        }
+    }
+
     if (timerOpen) {
         AlertDialog(
             onDismissRequest = { timerOpen = false },
@@ -462,6 +514,7 @@ private fun PlayerActionButton(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PlayerActionIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -469,15 +522,23 @@ private fun PlayerActionIcon(
     tint: androidx.compose.ui.graphics.Color,
     enabled: Boolean,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        IconButton(
-            onClick = onClick,
-            enabled = enabled,
+        // A plain Box rather than IconButton: IconButton swallows the long
+        // press, so the trim editor could never be reached from here.
+        Box(
+            contentAlignment = Alignment.Center,
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .combinedClickable(
+                    enabled = enabled,
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                )
+                .alpha(if (enabled) 1f else 0.45f),
         ) {
             Icon(
                 icon,
@@ -526,5 +587,85 @@ fun QueueRow(track: Track, active: Boolean, onClick: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+/** Head/tail trim editor, mirroring the launcher-style toggle in settings. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun TrimSheet(
+    enabled: Boolean,
+    intro: Int,
+    outro: Int,
+    onChange: (Boolean, Int, Int) -> Unit,
+) {
+    Column(Modifier.padding(horizontal = 24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "跳过头尾",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            androidx.compose.material3.Switch(
+                checked = enabled,
+                onCheckedChange = { onChange(it, intro, outro) },
+            )
+        }
+        Text(
+            "按每集时长比例裁剪，百分比会自动换算成本集的秒数。",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        TrimSlider(
+            title = "片头",
+            permille = intro,
+            enabled = enabled,
+            onChange = { onChange(enabled, it, outro) },
+        )
+        TrimSlider(
+            title = "片尾",
+            permille = outro,
+            enabled = enabled,
+            onChange = { onChange(enabled, intro, it) },
+        )
+        TextButton(
+            onClick = { onChange(false, intro, outro) },
+            modifier = Modifier.padding(bottom = 12.dp),
+        ) {
+            Text("关闭跳过头尾")
+        }
+    }
+}
+
+@Composable
+private fun TrimSlider(
+    title: String,
+    permille: Int,
+    enabled: Boolean,
+    onChange: (Int) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(top = 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (permille == 0) {
+                    "不跳过"
+                } else {
+                    "%.1f%%".format(permille / 10.0)
+                },
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = permille.toFloat(),
+            onValueChange = { onChange(it.roundToInt()) },
+            valueRange = 0f..teikengstudio.xmpro.data.MAX_SKIP_PERMILLE.toFloat(),
+            enabled = enabled,
+        )
     }
 }

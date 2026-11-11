@@ -436,13 +436,15 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 val resolved = withContext(Dispatchers.IO) {
                     container.client(container.activeAccount).resolve(track.number, quality)
                 }
-                playback.start(resolved.url, resolved.track.title) {
+                val startAt = if (resumePositionMs > 0) {
+                    resumePositionMs
+                } else {
+                    introSeekMs(resolved.track.duration)
+                }
+                playback.start(resolved.url, resolved.track.title, startAt) {
                     sessionTrack = resolved.track
                     sessionStartedAt = System.currentTimeMillis()
                     _state.update { it.copy(playing = resolved.track) }
-                    val intro = introSeekMs(resolved.track.duration)
-                    val seek = if (resumePositionMs > 0) resumePositionMs else intro
-                    if (seek > 0) playback.seekTo(seek)
                 }
             } catch (error: Exception) {
                 _state.update { it.copy(message = describe(error)) }
