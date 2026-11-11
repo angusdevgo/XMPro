@@ -593,7 +593,7 @@ private fun ProfileHeader(
             val balance = account.balance
             Text(
                 listOfNotNull(
-                    balance?.let { "可用听时 " + formatListeningTime(it.remainingSeconds) },
+                    balance?.let { "本机可用听时 " + formatListeningTime(it.remainingSeconds) },
                     balance?.let {
                         "核验于 " + SimpleDateFormat("M-d HH:mm", Locale.CHINA)
                             .format(Date(it.checkedAt.toEpochMilli()))
@@ -1114,7 +1114,7 @@ private fun LoginEntry(onAddCookie: () -> Unit, onAddSms: () -> Unit) {
         Column(Modifier.padding(20.dp)) {
             Text("还没有登录账号", style = MaterialTheme.typography.titleMedium)
             Text(
-                "登录后可同步订阅、听更新与云历史，并查看可用听时",
+                "登录后可同步订阅、听更新与云历史，并查看本机可用听时",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
