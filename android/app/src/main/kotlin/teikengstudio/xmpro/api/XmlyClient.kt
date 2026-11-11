@@ -478,6 +478,59 @@ class XmlyClient(
         return activity("report", seconds)
     }
 
+    /**
+     * Dumps every field the listening-time endpoint returns, decrypted.
+     *
+     * The client only consumes `availableListenDuration` and `newDevice`, so a
+     * change or an extra field on the server side stays invisible. This exists
+     * to look at the whole payload without guessing.
+     */
+    fun quotaDiagnostics(): String {
+        val account = credentials ?: throw XmlyException("login_required", "请先登录", definitive = true)
+        val params = linkedMapOf(
+            "deviceId" to account.deviceId,
+            "timestamp" to clock().toEpochMilli().toString(),
+            "uid" to account.uid,
+        )
+        val body = linkedMapOf<String, Any?>()
+        params.forEach { (key, value) -> if (key != "uid") body[key] = value }
+        body["signature"] = XmlyCrypto.activitySignature(params)
+        val payload = http.postJson(
+            mobile,
+            "/lite-mobile/audi/func/v1/config",
+            json = body,
+            credentials = account,
+            readOnly = true,
+            responseLimit = XmlyHttp.MAX_RESPONSE_BYTES,
+        )
+        val data = payload.optJSONObject("data")
+        return buildString {
+            appendLine("ret=${payload.opt("ret")}  msg=${payload.optString("msg")}")
+            appendLine("uid=${account.uid}  device=${account.deviceId.takeLast(6)}")
+            if (data == null) {
+                append("data 为空")
+                return@buildString
+            }
+            appendLine("data 字段：")
+            val keys = data.keys().asSequence().toList().sorted()
+            for (key in keys) {
+                val raw = data.opt(key)
+                append("  ").append(key).append(" = ")
+                if (raw is String) {
+                    val plain = runCatching { XmlyCrypto.decrypt(raw, XmlyCrypto.durationKey) }.getOrNull()
+                    if (plain != null) {
+                        append(plain)
+                    } else {
+                        append("(未按听时密钥解出) ").append(raw.take(48))
+                    }
+                } else {
+                    append(raw)
+                }
+                appendLine()
+            }
+        }
+    }
+
     private fun activity(name: String, seconds: Int?): Quota {
         val account = credentials ?: throw XmlyException("login_required", "请先登录", definitive = true)
         val params = linkedMapOf(

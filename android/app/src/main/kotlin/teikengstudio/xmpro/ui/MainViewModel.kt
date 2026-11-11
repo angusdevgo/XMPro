@@ -78,6 +78,8 @@ data class UiState(
     val rewardTiers: List<teikengstudio.xmpro.api.RewardTier>? = null,
     /** Raw welfare task payload, kept for cases the summary cannot explain. */
     val rewardTasks: String? = null,
+    /** Raw listening-time payload, for the same reason. */
+    val quotaRaw: String? = null,
     val accountBusy: Boolean = false,
     /** Playback queue and the index of the track that is loaded. */
     val queue: List<Track> = emptyList(),
@@ -1135,10 +1137,16 @@ class MainViewModel(private val context: Context, private val container: AppCont
         viewModelScope.launch {
             _state.update { it.copy(accountBusy = true) }
             try {
-                val (tiers, text) = withContext(Dispatchers.IO) {
-                    container.rewardTiers(identity) to container.rewardTasks(identity)
+                val loaded = withContext(Dispatchers.IO) {
+                    Triple(
+                        container.rewardTiers(identity),
+                        container.rewardTasks(identity),
+                        runCatching { container.quotaDiagnostics(identity) }.getOrElse { "读取失败：${describe(it)}" },
+                    )
                 }
-                _state.update { it.copy(rewardTiers = tiers, rewardTasks = text) }
+                _state.update {
+                    it.copy(rewardTiers = loaded.first, rewardTasks = loaded.second, quotaRaw = loaded.third)
+                }
             } catch (error: Exception) {
                 _state.update { it.copy(message = describe(error)) }
             } finally {
@@ -1147,7 +1155,8 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
-    fun closeRewardTasks() = _state.update { it.copy(rewardTiers = null, rewardTasks = null) }
+    fun closeRewardTasks() =
+        _state.update { it.copy(rewardTiers = null, rewardTasks = null, quotaRaw = null) }
 
     fun claimOnce(identity: String) = accountAction({
         container.claimOnce(identity)

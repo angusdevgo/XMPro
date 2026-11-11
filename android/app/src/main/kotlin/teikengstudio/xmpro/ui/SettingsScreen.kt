@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
@@ -1778,9 +1779,10 @@ private fun AboutPage(
 fun RewardTasksDialog(
     tiers: List<teikengstudio.xmpro.api.RewardTier>,
     raw: String?,
+    quotaRaw: String?,
     onDismiss: () -> Unit,
 ) {
-    var showRaw by remember { mutableStateOf(false) }
+    var section by remember { mutableStateOf(0) }
     val total = tiers.sumOf { it.seconds }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1792,9 +1794,19 @@ fun RewardTasksDialog(
                     .heightIn(max = 420.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                if (showRaw) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((index, label) in listOf("档位", "听时接口", "任务原文").withIndex()) {
+                        FilterChip(
+                            selected = section == index,
+                            onClick = { section = index },
+                            label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                if (section > 0) {
                     Text(
-                        raw ?: "暂无原始数据",
+                        (if (section == 1) quotaRaw else raw) ?: "暂无数据",
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -1845,10 +1857,6 @@ fun RewardTasksDialog(
                         )
                     }
                 }
-                TextButton(
-                    onClick = { showRaw = !showRaw },
-                    modifier = Modifier.padding(top = 4.dp),
-                ) { Text(if (showRaw) "看汇总" else "看原始数据", style = MaterialTheme.typography.labelMedium) }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },

@@ -345,6 +345,7 @@ fun ShellScreen(
             RewardTasksDialog(
                 tiers = tiers,
                 raw = state.rewardTasks,
+                quotaRaw = state.quotaRaw,
                 onDismiss = viewModel::closeRewardTasks,
             )
         }

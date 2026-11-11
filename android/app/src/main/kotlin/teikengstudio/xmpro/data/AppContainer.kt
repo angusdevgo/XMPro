@@ -266,6 +266,9 @@ class AppContainer(context: Context) {
     fun rewardTiers(identity: String): List<teikengstudio.xmpro.api.RewardTier> =
         XmlyRewards(client(identity)).tiers()
 
+    /** Raw listening-time payload, for the diagnostics dialog. */
+    fun quotaDiagnostics(identity: String): String = client(identity).quotaDiagnostics()
+
     fun resumeRewards(identity: String) {
         store.transaction { state ->
             state.optJSONObject("accounts")?.optJSONObject(identity)?.put("rewardPaused", false)
