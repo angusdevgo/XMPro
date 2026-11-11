@@ -419,6 +419,18 @@ class AppContainer(context: Context) {
      * A fixed second count cannot serve both a 3-minute clip and a 40-minute
      * episode, so the trim points follow the track length instead.
      */
+    /** App playback volume, 0..1; kept across albums and sessions. */
+    fun playVolume(): Float = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optDouble("volume", 1.0)?.toFloat()?.coerceIn(0f, 1f) ?: 1f
+
+    fun setPlayVolume(volume: Float) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            val playback = settings.optJSONObject("playback") ?: org.json.JSONObject().also { settings.put("playback", it) }
+            playback.put("volume", volume.coerceIn(0f, 1f).toDouble())
+        }
+    }
+
     /** GitHub mirror prefix used by the update check; empty means direct. */
     fun updateMirror(): String = store.state().optJSONObject("settings")
         ?.optString("updateMirror") ?: ""

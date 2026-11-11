@@ -84,6 +84,8 @@ data class UiState(
     /** Requested audio quality (auto / m4a_128 / m4a_64 / mp3_32). */
     val quality: String = "auto",
     /** Trim points as per-thousand of each track, so they fit any episode length. */
+    /** App-level playback volume, 0..1. */
+    val playVolume: Float = 1f,
     /** About page: mirror choice and the update probe result. */
     val updateMirror: String = "",
     val updateChecking: Boolean = false,
@@ -146,6 +148,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
             autoClaim = container.autoClaim(),
             bookmarks = container.bookmarks(),
             quality = container.playbackQuality(),
+            playVolume = container.playVolume(),
             updateMirror = container.updateMirror(),
             skipTrimEnabled = container.skipTrimEnabled(),
             skipTrimMode = container.skipTrimMode(),
@@ -492,6 +495,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 } else {
                     introSeekMs(resolved.track.duration)
                 }
+                playback.setVolume(_state.value.playVolume)
                 playback.start(resolved.url, resolved.track.title, startAt) {
                     if (request != playRequest) return@start
                     sessionTrack = resolved.track
@@ -661,6 +665,14 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     fun openLink(url: String) = teikengstudio.xmpro.updater.Updater.open(context, url)
 
+    /** Applies the volume immediately and remembers it for the next track. */
+    fun setVolume(volume: Float) {
+        val level = volume.coerceIn(0f, 1f)
+        runCatching { container.setPlayVolume(level) }
+        playback.setVolume(level)
+        _state.update { it.copy(playVolume = level) }
+    }
+
     fun setDynamicColor(enabled: Boolean) {
         runCatching { container.setDynamicColor(enabled) }
         _state.update { it.copy(dynamicColor = enabled) }
@@ -767,7 +779,8 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     ),
                     seedColor = container.seedColor(),
                     quality = container.playbackQuality(),
-                    updateMirror = container.updateMirror(),
+                    playVolume = container.playVolume(),
+            updateMirror = container.updateMirror(),
                     skipTrimEnabled = container.skipTrimEnabled(),
                     skipTrimMode = container.skipTrimMode(),
                     introSkipPermille = container.introSkipPermille(),

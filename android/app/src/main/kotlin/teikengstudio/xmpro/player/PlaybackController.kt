@@ -125,6 +125,9 @@ class PlaybackController(private val context: Context) {
 
     fun setSpeed(speed: Float) = withController { it.setPlaybackSpeed(speed) }
 
+    /** App-level volume, independent of the device stream volume. */
+    fun setVolume(volume: Float) = withController { it.volume = volume.coerceIn(0f, 1f) }
+
     fun stop() = withController {
         it.stop()
         it.clearMediaItems()

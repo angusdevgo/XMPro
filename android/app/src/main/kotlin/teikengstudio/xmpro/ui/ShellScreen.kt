@@ -327,6 +327,7 @@ fun ShellScreen(
                     isFavorite = state.playing?.let { track -> track.id in state.favoriteIds } == true,
                     onBookmark = viewModel::saveBookmark,
                     onSleepTimer = viewModel::setSleepTimer,
+                    onVolume = viewModel::setVolume,
                     onSelectQueue = { index ->
                         viewModel.playQueue(state.queue, index)
                     },

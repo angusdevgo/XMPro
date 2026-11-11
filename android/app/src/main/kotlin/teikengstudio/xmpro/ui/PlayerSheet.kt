@@ -36,6 +36,8 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
@@ -90,6 +92,7 @@ fun PlayerSheet(
     onSelectQueue: (Int) -> Unit,
     onOpenAlbum: (String) -> Unit = {},
     onSkipTrim: (Boolean, Int, Int, String) -> Unit = { _, _, _, _ -> },
+    onVolume: (Float) -> Unit = {},
 ) {
     val track = state.playing
     var queueOpen by remember { mutableStateOf(false) }
@@ -263,6 +266,35 @@ fun PlayerSheet(
                         // in settings.
                         if (turningOn) trimOpen = true
                     },
+                )
+            }
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (state.playVolume <= 0.01f) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                    contentDescription = "音量",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+                Slider(
+                    value = state.playVolume,
+                    onValueChange = onVolume,
+                    valueRange = 0f..1f,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 10.dp),
+                )
+                Text(
+                    "${(state.playVolume * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(38.dp),
+                    textAlign = TextAlign.End,
                 )
             }
 
