@@ -3,9 +3,14 @@ package teikengstudio.xmpro.updater
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 /**
  * Update check against the project's own GitHub releases.
@@ -32,8 +37,17 @@ object Updater {
         val tag: String,
         val notes: String,
         val apkUrl: String?,
+        val apkName: String,
+        /** Link to the release's SHA256SUMS asset, when it published one. */
+        val sumsUrl: String?,
         val pageUrl: String,
     )
+
+    /** Result of an in-app download: the verified file, or a failure to show. */
+    sealed interface Download {
+        class Done(val file: File, val verified: Boolean) : Download
+        class Failed(val message: String) : Download
+    }
 
     private fun proxied(url: String, mirror: String): String =
         if (mirror.isBlank()) url else mirror + url
@@ -64,13 +78,21 @@ object Updater {
             if (!newer) error("已是最新版本")
             val assets = payload.optJSONArray("assets")
             var apk: String? = null
+            var apkName = ""
+            var sums: String? = null
             if (assets != null) {
                 for (index in 0 until assets.length()) {
                     val asset = assets.optJSONObject(index) ?: continue
                     val name = asset.optString("name")
-                    if (name.endsWith(".apk")) {
-                        apk = proxied(asset.optString("browser_download_url"), mirror)
-                        break
+                    when {
+                        name.endsWith(".apk") && apk == null -> {
+                            apkName = name
+                            apk = proxied(asset.optString("browser_download_url"), mirror)
+                        }
+
+                        name == "SHA256SUMS" -> {
+                            sums = proxied(asset.optString("browser_download_url"), mirror)
+                        }
                     }
                 }
             }
@@ -78,6 +100,8 @@ object Updater {
                 tag = tag,
                 notes = payload.optString("body").take(1500),
                 apkUrl = apk,
+                apkName = apkName,
+                sumsUrl = sums,
                 pageUrl = payload.optString("html_url").ifEmpty { WEB_URL },
             )
         } catch (error: Exception) {
@@ -113,4 +137,132 @@ object Updater {
             )
         }
     }
+
+    /**
+     * Downloads [url] into the app's private update folder and verifies it.
+     *
+     * The digest is computed while streaming, so nothing unverified ever sits in
+     * a path the installer can reach. [onProgress] receives 0..100, or -1 when
+     * the server reports no length (mirrors often strip it).
+     */
+    fun download(
+        context: Context,
+        url: String,
+        tag: String,
+        expectedSha: String?,
+        onProgress: (Int) -> Unit,
+    ): Download {
+        val folder = File(context.filesDir, "update").apply { mkdirs() }
+        // Remove leftovers so a failed attempt cannot be installed later.
+        folder.listFiles()?.forEach { it.delete() }
+        val target = File(folder, "xmpro-" + tag.removePrefix("v") + ".apk")
+        val digest = MessageDigest.getInstance("SHA-256")
+        try {
+            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 20_000
+                readTimeout = 30_000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", "XMPro")
+            }
+            try {
+                if (connection.responseCode !in 200..299) {
+                    return Download.Failed("下载失败（HTTP " + connection.responseCode + "）")
+                }
+                val total = connection.contentLengthLong
+                var read = 0L
+                connection.inputStream.use { input ->
+                    target.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count <= 0) break
+                            output.write(buffer, 0, count)
+                            digest.update(buffer, 0, count)
+                            read += count
+                            onProgress(if (total > 0) ((read * 100) / total).toInt() else -1)
+                        }
+                    }
+                }
+            } finally {
+                connection.disconnect()
+            }
+        } catch (error: Exception) {
+            target.delete()
+            return Download.Failed(friendly(error))
+        }
+        if (target.length() <= 0L) {
+            target.delete()
+            return Download.Failed("下载内容为空，请换用其他镜像")
+        }
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        if (expectedSha.isNullOrEmpty()) {
+            // Without a published digest the file cannot be verified; say so
+            // rather than quietly trusting whatever arrived.
+            return Download.Done(target, verified = false)
+        }
+        if (!actual.equals(expectedSha, ignoreCase = true)) {
+            target.delete()
+            return Download.Failed("校验值不匹配，文件可能被替换，已删除")
+        }
+        return Download.Done(target, verified = true)
+    }
+
+    /** Reads SHA256SUMS and returns "<file name> -> <digest>" pairs. */
+    fun checksums(url: String): Map<String, String> {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 15_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "XMPro")
+        }
+        try {
+            if (connection.responseCode !in 200..299) return emptyMap()
+            val text = connection.inputStream.bufferedReader().use { it.readText() }
+            val result = LinkedHashMap<String, String>()
+            for (line in text.lineSequence()) {
+                val parts = line.trim().split(WHITESPACE)
+                if (parts.size < 2) continue
+                val hash = parts[0]
+                if (hash.length != 64) continue
+                result[parts[1].substringAfterLast('/')] = hash
+            }
+            return result
+        } catch (_: Exception) {
+            return emptyMap()
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * Hands a verified APK to the system installer.
+     *
+     * Returns false when the user still has to allow "install unknown apps";
+     * the matching settings screen is opened in that case.
+     */
+    fun install(context: Context, file: File): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !context.packageManager.canRequestPackageInstalls()
+        ) {
+            runCatching {
+                context.startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + context.packageName),
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            return false
+        }
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+        )
+        return true
+    }
+
+    private val WHITESPACE = Regex("[\\s]+")
 }

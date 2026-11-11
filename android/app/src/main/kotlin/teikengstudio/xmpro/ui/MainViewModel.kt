@@ -97,6 +97,10 @@ data class UiState(
     val updateChecking: Boolean = false,
     val updateResult: String? = null,
     val updateUrl: String? = null,
+    /** In-app download progress 0..100, or -1 while a mirror hides the length. */
+    val updateProgress: Int = -1,
+    /** True once the APK is downloaded and waiting for the installer. */
+    val updateReady: Boolean = false,
     val skipTrimEnabled: Boolean = false,
     val skipTrimMode: String = teikengstudio.xmpro.player.SmartSkip.MODE_SMART,
     val introSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
@@ -140,6 +144,12 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     private var sessionTrack: Track? = null
     private var sessionStartedAt = 0L
+
+    /**
+     * Account that started the current session. Progress must be reported to the
+     * account that consumed the listening time, not to whatever is active later.
+     */
+    private var sessionIdentity: String? = null
     private var sleepJob: Job? = null
 
     private val initialAccounts = container.accounts()
@@ -506,6 +516,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     if (request != playRequest) return@start
                     sessionTrack = resolved.track
                     sessionStartedAt = System.currentTimeMillis()
+                    sessionIdentity = container.activeAccount
                     _state.update { it.copy(playing = resolved.track) }
                 }
             } catch (error: Exception) {
@@ -601,6 +612,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
         syncProgress()
         sessionTrack = null
         sessionStartedAt = 0
+        sessionIdentity = null
         playback.stop()
         ticker?.cancel()
         _state.update { it.copy(playing = null) }
@@ -662,12 +674,85 @@ class MainViewModel(private val context: Context, private val container: AppCont
                         "发现新版本 ${found.tag}" + suffix
                     } ?: (outcome.exceptionOrNull()?.message ?: "检查失败"),
                     updateUrl = release?.apkUrl ?: release?.pageUrl,
+                    updateProgress = -1,
+                    updateReady = false,
                 )
+            }
+            pendingRelease = release
+            pendingFile = null
+        }
+    }
+
+    fun clearUpdateResult() = _state.update {
+        it.copy(updateResult = null, updateUrl = null, updateProgress = -1, updateReady = false)
+    }
+
+    private var pendingRelease: teikengstudio.xmpro.updater.Updater.Release? = null
+    private var pendingFile: java.io.File? = null
+
+    /**
+     * Downloads the new APK in-app and verifies its SHA-256 against the release's
+     * SHA256SUMS before the installer ever sees it.
+     */
+    fun downloadUpdate() {
+        val release = pendingRelease ?: return
+        val url = release.apkUrl ?: return
+        if (_state.value.updateProgress >= 0) return
+        _state.update { it.copy(updateProgress = 0, updateReady = false) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                val expected = release.sumsUrl
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { sumsUrl -> teikengstudio.xmpro.updater.Updater.checksums(sumsUrl)[release.apkName] }
+                teikengstudio.xmpro.updater.Updater.download(
+                    context = context,
+                    url = url,
+                    tag = release.tag,
+                    expectedSha = expected,
+                ) { percent ->
+                    _state.update { state ->
+                        if (state.updateProgress == percent) state else state.copy(updateProgress = percent)
+                    }
+                }
+            }
+            when (outcome) {
+                is teikengstudio.xmpro.updater.Updater.Download.Done -> {
+                    pendingFile = outcome.file
+                    _state.update {
+                        it.copy(
+                            updateReady = true,
+                            updateProgress = 100,
+                            updateResult = if (outcome.verified) {
+                                "已下载并通过 SHA-256 校验，点「安装」继续。"
+                            } else {
+                                "已下载，但该版本没有提供校验值，无法确认文件完整。"
+                            },
+                        )
+                    }
+                }
+
+                is teikengstudio.xmpro.updater.Updater.Download.Failed -> {
+                    _state.update { it.copy(updateProgress = -1, updateResult = outcome.message) }
+                }
             }
         }
     }
 
-    fun clearUpdateResult() = _state.update { it.copy(updateResult = null, updateUrl = null) }
+    /** Hands the verified file to the system installer. */
+    fun installUpdate() {
+        val file = pendingFile ?: return
+        val opened = runCatching {
+            teikengstudio.xmpro.updater.Updater.install(context, file)
+        }.getOrElse { failure ->
+            _state.update { it.copy(updateResult = "无法启动安装：" + (failure.message ?: "未知错误")) }
+            return
+        }
+        if (!opened) {
+            _state.update {
+                it.copy(updateResult = "请在系统设置里允许 XMPro 安装应用，然后回来再点一次「安装」。")
+            }
+        }
+    }
 
     fun openLink(url: String) = teikengstudio.xmpro.updater.Updater.open(context, url)
 
@@ -815,7 +900,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    XmlyHistory(container.client(container.activeAccount))
+                    XmlyHistory(container.client(sessionIdentity ?: container.activeAccount))
                         .sync(track, position, started.coerceAtLeast(1), endedAt)
                 }
             }
@@ -1121,7 +1206,49 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
-    fun setPrimaryAccount(identity: String) = accountAction({ container.setPrimaryAccount(identity) }, "已切换主账号")
+    fun setPrimaryAccount(identity: String) = accountAction({ container.setPrimaryAccount(identity) }, "已设为主账号")
+
+    /**
+     * Switches the account in use and reloads everything that belongs to it.
+     *
+     * The previous account's lists are cleared first, otherwise its subscriptions
+     * and favourites stay on screen until each request happens to come back.
+     */
+    fun switchAccount(identity: String) {
+        if (identity == _state.value.account) return
+        viewModelScope.launch {
+            _state.update { it.copy(accountBusy = true) }
+            try {
+                withContext(Dispatchers.IO) { container.switchAccount(identity) }
+                _state.update {
+                    it.copy(
+                        signedIn = true,
+                        account = identity,
+                        accounts = container.accounts(),
+                        subscriptions = emptyList(),
+                        moreSubscriptions = false,
+                        subscriptionPage = 0,
+                        updates = emptyList(),
+                        moreUpdates = false,
+                        nextTimeline = null,
+                        history = emptyList(),
+                        favorites = emptyList(),
+                        moreFavorites = false,
+                        favoritePage = 0,
+                        favoriteIds = emptySet(),
+                        bookmarks = container.bookmarks(),
+                        message = "已切换账号",
+                    )
+                }
+                refreshListening()
+                loadHome()
+            } catch (error: Exception) {
+                _state.update { it.copy(message = describe(error)) }
+            } finally {
+                _state.update { it.copy(accountBusy = false) }
+            }
+        }
+    }
 
     fun removeAccount(identity: String) = accountAction({ container.removeAccount(identity) }, "已移除账号") {
         _state.update {

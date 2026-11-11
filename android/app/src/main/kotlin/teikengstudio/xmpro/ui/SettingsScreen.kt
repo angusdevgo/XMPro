@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -103,6 +107,7 @@ fun SettingsScreen(
     onThemeMode: (String) -> Unit,
     onOledBlack: (Boolean) -> Unit,
     onSetPrimary: (String) -> Unit,
+    onSwitchAccount: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
@@ -114,6 +119,8 @@ fun SettingsScreen(
     onQuality: (String) -> Unit,
     onSkipTrim: (Boolean, Int, Int, String) -> Unit,
     onCheckUpdate: () -> Unit = {},
+    onDownloadUpdate: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
     onMirror: (String) -> Unit = {},
     onOpenLink: (String) -> Unit = {},
     onDismissUpdate: () -> Unit = {},
@@ -147,6 +154,7 @@ fun SettingsScreen(
                 onQueryQuota = onQueryQuota,
                 onClaimOnce = onClaimOnce,
                 onRewardTasks = onRewardTasks,
+                onSwitchAccount = onSwitchAccount,
                 onOpenSocial = onOpenSocial,
             )
 
@@ -163,6 +171,7 @@ fun SettingsScreen(
                         current = current,
                         onSignOut = onSignOut,
                         onSetPrimary = onSetPrimary,
+                        onSwitchAccount = onSwitchAccount,
                         onRemoveAccount = onRemoveAccount,
                         onQueryQuota = onQueryQuota,
                         onClaimOnce = onClaimOnce,
@@ -339,6 +348,8 @@ fun SettingsScreen(
                     state = state,
                     bottomInset = bottomInset,
                     onCheckUpdate = onCheckUpdate,
+                    onDownloadUpdate = onDownloadUpdate,
+                    onInstallUpdate = onInstallUpdate,
                     onMirror = onMirror,
                     onOpenLink = onOpenLink,
                     onDismissResult = onDismissUpdate,
@@ -374,7 +385,6 @@ fun SettingsScreen(
     if (showSms) {
         SmsLoginDialog(
             callbacks = smsLogin,
-            signedIn = state.signedIn,
             onDismiss = { showSms = false },
             onSignedIn = {
                 showSms = false
@@ -394,6 +404,7 @@ private fun SettingsRoot(
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
     onRewardTasks: (String) -> Unit,
+    onSwitchAccount: (String) -> Unit,
     onOpenSocial: (String) -> Unit,
 ) {
     Column(
@@ -415,6 +426,7 @@ private fun SettingsRoot(
                 onQueryQuota = onQueryQuota,
                 onClaimOnce = onClaimOnce,
                 onRewardTasks = onRewardTasks,
+                onSwitchAccount = onSwitchAccount,
                 onOpenSocial = onOpenSocial,
             )
         }
@@ -465,8 +477,10 @@ private fun ProfileHeader(
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
     onRewardTasks: (String) -> Unit,
+    onSwitchAccount: (String) -> Unit,
     onOpenSocial: (String) -> Unit,
 ) {
+    var switchOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -570,27 +584,115 @@ private fun ProfileHeader(
                 modifier = Modifier.padding(top = 10.dp),
             )
             Row(
-                Modifier.padding(top = 10.dp),
+                Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Equal thirds: with three labels the last one used to wrap onto
+                // two lines and leave the row uneven.
                 Button(
                     onClick = { onQueryQuota(account.identity) },
                     enabled = !state.accountBusy,
                     shape = CircleShape,
-                ) { Text("查询听时") }
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                    modifier = Modifier.weight(1f),
+                ) { Text("查询听时", maxLines = 1, softWrap = false) }
                 FilledTonalButton(
                     onClick = { onRewardTasks(account.identity) },
                     enabled = !state.accountBusy,
                     shape = CircleShape,
-                ) { Text("福利任务") }
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                    modifier = Modifier.weight(1f),
+                ) { Text("福利任务", maxLines = 1, softWrap = false) }
                 FilledTonalButton(
                     onClick = { onClaimOnce(account.identity) },
                     enabled = !state.accountBusy,
                     shape = CircleShape,
-                ) { Text("领取一次") }
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                    modifier = Modifier.weight(1f),
+                ) { Text("领取一次", maxLines = 1, softWrap = false) }
+            }
+            if (state.accounts.size > 1) {
+                OutlinedButton(
+                    onClick = { switchOpen = true },
+                    enabled = !state.accountBusy,
+                    shape = CircleShape,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.SwapHoriz,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text("切换账号", modifier = Modifier.padding(start = 6.dp), maxLines = 1)
+                }
             }
         }
     }
+
+    if (switchOpen) {
+        AccountPicker(
+            accounts = state.accounts,
+            current = account,
+            onPick = { identity ->
+                switchOpen = false
+                onSwitchAccount(identity)
+            },
+            onDismiss = { switchOpen = false },
+        )
+    }
+}
+
+/** Picks which account is in use; welfare actions only apply after switching. */
+@Composable
+private fun AccountPicker(
+    accounts: List<AccountSummary>,
+    current: AccountSummary?,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("切换账号") },
+        text = {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                for (row in accounts) {
+                    val active = row.identity == current?.identity
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = !active) { onPick(row.identity) }
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                row.nickname.ifEmpty { "账号 ${row.uid.ifEmpty { row.identity.take(8) }}" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                "UID ${row.uid.ifEmpty { "—" }} · " +
+                                    (row.balance?.let { formatListeningTime(it.remainingSeconds) } ?: "听时未核验"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                        if (active) {
+                            Text(
+                                "使用中",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }
 
 @Composable
@@ -876,6 +978,7 @@ private fun AccountContent(
     current: AccountSummary?,
     onSignOut: () -> Unit,
     onSetPrimary: (String) -> Unit,
+    onSwitchAccount: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
@@ -892,17 +995,15 @@ private fun AccountContent(
         return
     }
     if (state.accounts.size > 1) {
-        SettingsSectionLabel("其他账号")
+        SettingsSectionLabel("其他账号 · 点击即可切换")
         for (account in state.accounts.filter { it.identity != current.identity }) {
             SettingsGroup {
                 AccountCard(
                     account = account,
                     busy = state.accountBusy,
                     onSetPrimary = onSetPrimary,
+                    onSwitch = onSwitchAccount,
                     onRemove = onRemoveAccount,
-                    onQueryQuota = onQueryQuota,
-                    onClaim = onClaimOnce,
-                    onResume = onResumeRewards,
                 )
             }
         }
@@ -1098,17 +1199,21 @@ private fun ActionRow(
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun AccountCard(
     account: AccountSummary,
     busy: Boolean,
     onSetPrimary: (String) -> Unit,
+    onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
-    onQueryQuota: (String) -> Unit,
-    onClaim: (String) -> Unit,
-    onResume: (String) -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !busy) { onSwitch(account.identity) }
+            .padding(14.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 account.nickname.ifEmpty { "账号 ${account.uid.ifEmpty { account.identity.take(8) }}" },
@@ -1130,6 +1235,12 @@ private fun AccountCard(
                     )
                 }
             }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "切换到此账号",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp).size(18.dp),
+            )
         }
         Text(
             "设备 ${account.deviceHint} · " +
@@ -1148,26 +1259,33 @@ private fun AccountCard(
         }
         Row(
             Modifier.fillMaxWidth().padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (!account.primary) {
-                TextButton(onClick = { onSetPrimary(account.identity) }, enabled = !busy) {
-                    Text("设为主账号")
+            // Wrapping row: labels stay on one line each and move down as a whole
+            // instead of being squeezed into two-character columns.
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (!account.primary) {
+                    TextButton(onClick = { onSetPrimary(account.identity) }, enabled = !busy) {
+                        Text("设为主账号", maxLines = 1, softWrap = false)
+                    }
                 }
-            }
-            TextButton(onClick = { onQueryQuota(account.identity) }, enabled = !busy) {
-                Text("查询听时")
-            }
-            TextButton(onClick = { onClaim(account.identity) }, enabled = !busy && !account.paused) {
-                Text("领取一次")
-            }
-            if (account.paused) {
-                TextButton(onClick = { onResume(account.identity) }, enabled = !busy) {
-                    Text("恢复领取")
+                // Welfare actions belong to the account in use, so an inactive
+                // account only offers switching.
+                TextButton(onClick = { onSwitch(account.identity) }, enabled = !busy) {
+                    Text("切换到该账号", maxLines = 1, softWrap = false)
                 }
-            }
-            TextButton(onClick = { onRemove(account.identity) }, enabled = !busy) {
-                Text("移除")
+                // Destructive action is an icon so it never competes for label width.
+                IconButton(onClick = { onRemove(account.identity) }, enabled = !busy) {
+                    Icon(
+                        Icons.Outlined.DeleteOutline,
+                        contentDescription = "移除账号",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }
@@ -1406,7 +1524,6 @@ class SmsLoginCallbacks(
 @Composable
 private fun SmsLoginDialog(
     callbacks: SmsLoginCallbacks,
-    signedIn: Boolean,
     onDismiss: () -> Unit,
     onSignedIn: () -> Unit,
 ) {
@@ -1535,9 +1652,9 @@ private fun SmsLoginDialog(
         )
     }
 
-    LaunchedEffect(signedIn) {
-        if (signedIn) onSignedIn()
-    }
+    // The dialog used to close itself whenever the app was already signed in,
+    // so adding a second account flashed and vanished. Closing is driven by the
+    // verify callback below instead.
 }
 
 private fun themeLabel(mode: String): String = when (mode) {
@@ -1622,6 +1739,8 @@ private fun AboutPage(
     state: UiState,
     bottomInset: Dp,
     onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
     onMirror: (String) -> Unit,
     onOpenLink: (String) -> Unit,
     onDismissResult: () -> Unit,
@@ -1750,25 +1869,65 @@ private fun AboutPage(
     }
 
     state.updateResult?.let { message ->
+        val downloading = state.updateProgress >= 0 && !state.updateReady
         AlertDialog(
-            onDismissRequest = onDismissResult,
-            title = { Text(if (state.updateUrl != null) "发现更新" else "检查结果") },
+            onDismissRequest = { if (!downloading) onDismissResult() },
+            title = {
+                Text(
+                    when {
+                        state.updateReady -> "可以安装"
+                        downloading -> "正在下载"
+                        state.updateUrl != null -> "发现更新"
+                        else -> "检查结果"
+                    },
+                )
+            },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text(message, style = MaterialTheme.typography.bodyMedium)
+                Column(
+                    Modifier
+                        .heightIn(max = 380.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (downloading) {
+                        if (state.updateProgress > 0) {
+                            LinearProgressIndicator(
+                                progress = { state.updateProgress / 100f },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                "${state.updateProgress}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        } else {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                    }
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = if (downloading) 12.dp else 0.dp),
+                    )
                 }
             },
             confirmButton = {
-                val url = state.updateUrl
-                if (url != null) {
-                    TextButton(onClick = {
-                        onOpenLink(url)
-                        onDismissResult()
-                    }) { Text("前往下载") }
+                when {
+                    state.updateReady ->
+                        TextButton(onClick = onInstallUpdate) { Text("安装") }
+
+                    downloading -> Unit
+
+                    state.updateUrl != null ->
+                        TextButton(onClick = onDownloadUpdate) { Text("立即更新") }
+
+                    else -> Unit
                 }
             },
             dismissButton = {
-                TextButton(onClick = onDismissResult) { Text("关闭") }
+                if (!downloading) {
+                    TextButton(onClick = onDismissResult) { Text("关闭") }
+                }
             },
         )
     }

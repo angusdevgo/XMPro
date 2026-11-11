@@ -177,6 +177,19 @@ class AppContainer(context: Context) {
             .toList()
     }
 
+    /**
+     * Switches the account in use without touching the stored credentials.
+     *
+     * The primary account only decides the default owner of new data, so
+     * switching must not silently promote the target as well.
+     */
+    fun switchAccount(identity: String) {
+        if (credentials.load(identity) == null) throw XmlyException("missing_account", "请先登录该账号")
+        if (activeAccount == identity) return
+        activeAccount = identity
+        store.transaction { state -> state.put("activeAccountId", identity) }
+    }
+
     fun setPrimaryAccount(identity: String) {
         if (credentials.load(identity) == null) throw XmlyException("missing_account", "请先登录该账号")
         activeAccount = identity
