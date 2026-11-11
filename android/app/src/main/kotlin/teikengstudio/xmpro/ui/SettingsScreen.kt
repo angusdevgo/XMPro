@@ -3,6 +3,14 @@ package teikengstudio.xmpro.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import teikengstudio.xmpro.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -100,7 +108,11 @@ fun SettingsScreen(
     onSyncProfile: () -> Unit,
     onRenameAccount: (String, String) -> Unit,
     onQuality: (String) -> Unit,
-    onSkipTrim: (Boolean, Int, Int) -> Unit,
+    onSkipTrim: (Boolean, Int, Int, String) -> Unit,
+    onCheckUpdate: () -> Unit = {},
+    onMirror: (String) -> Unit = {},
+    onOpenLink: (String) -> Unit = {},
+    onDismissUpdate: () -> Unit = {},
     onDynamicColor: (Boolean) -> Unit,
     onSeedColor: (Int) -> Unit,
     onOpenSocial: (String) -> Unit,
@@ -162,6 +174,7 @@ fun SettingsScreen(
 
             SettingsPage.Playback -> {
                 PageHeader("播放设置", onBack = { page = SettingsPage.Root })
+                val smart = state.skipTrimMode == teikengstudio.xmpro.player.SmartSkip.MODE_SMART
                 Column(
                     Modifier
                         .fillMaxSize()
@@ -190,18 +203,37 @@ fun SettingsScreen(
                     SettingsGroup {
                         SettingSwitchRow(
                             title = "跳过头尾",
-                            subtitle = "按比例裁掉开头与结尾，不同长度的声音都适用",
+                            subtitle = if (smart) {
+                                "自动跳过开头的空白与结尾的静音"
+                            } else {
+                                "按比例裁掉开头与结尾"
+                            },
                             checked = state.skipTrimEnabled,
-                            onCheckedChange = { onSkipTrim(it, state.introSkipPermille, state.outroSkipPermille) },
+                            onCheckedChange = {
+                                onSkipTrim(it, state.introSkipPermille, state.outroSkipPermille, state.skipTrimMode)
+                            },
                         )
+                        if (state.skipTrimEnabled) {
+                            GroupDivider()
+                            ChoiceRow(
+                                options = listOf(
+                                    teikengstudio.xmpro.player.SmartSkip.MODE_SMART to "智能",
+                                    teikengstudio.xmpro.player.SmartSkip.MODE_MANUAL to "手动",
+                                ),
+                                selected = state.skipTrimMode,
+                                onSelect = {
+                                    onSkipTrim(true, state.introSkipPermille, state.outroSkipPermille, it)
+                                },
+                            )
+                        }
                     }
-                    if (state.skipTrimEnabled) {
+                    if (state.skipTrimEnabled && !smart) {
                         SettingsGroup {
                             SkipSlider(
                                 title = "片头",
                                 permille = state.introSkipPermille,
                                 onValueChange = {
-                                    onSkipTrim(true, it, state.outroSkipPermille)
+                                    onSkipTrim(true, it, state.outroSkipPermille, state.skipTrimMode)
                                 },
                             )
                             GroupDivider()
@@ -209,7 +241,7 @@ fun SettingsScreen(
                                 title = "片尾",
                                 permille = state.outroSkipPermille,
                                 onValueChange = {
-                                    onSkipTrim(true, state.introSkipPermille, it)
+                                    onSkipTrim(true, state.introSkipPermille, it, state.skipTrimMode)
                                 },
                             )
                             Text(
@@ -297,21 +329,14 @@ fun SettingsScreen(
 
             SettingsPage.About -> {
                 PageHeader("关于", onBack = { page = SettingsPage.Root })
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp),
-                ) {
-                    SettingsGroup {
-                        InfoRow("XMPro", "喜马拉雅第三方客户端 · Kotlin + Compose 重构版")
-                        GroupDivider()
-                        InfoRow("数据目录", "应用专属外部存储，卸载后一并删除")
-                        GroupDivider()
-                        InfoRow("许可", "AGPL-3.0-or-later；界面参考 PiliPlus（GPL-3.0）")
-                    }
-                    Spacer(Modifier.height(bottomInset))
-                }
+                AboutPage(
+                    state = state,
+                    bottomInset = bottomInset,
+                    onCheckUpdate = onCheckUpdate,
+                    onMirror = onMirror,
+                    onOpenLink = onOpenLink,
+                    onDismissResult = onDismissUpdate,
+                )
             }
         }
     }
@@ -1570,5 +1595,160 @@ private fun percentLabel(permille: Int): String {
         "不跳过"
     } else {
         "%.1f%% · 10 分钟约 %d 秒".format(percent, seconds)
+    }
+}
+
+/**
+ * About page: identity at the top, then the three things a user actually needs
+ * here — check for updates, pick a GitHub mirror, open the repository.
+ */
+@Composable
+private fun AboutPage(
+    state: UiState,
+    bottomInset: Dp,
+    onCheckUpdate: () -> Unit,
+    onMirror: (String) -> Unit,
+    onOpenLink: (String) -> Unit,
+    onDismissResult: () -> Unit,
+) {
+    val context = LocalContext.current
+    val version = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: ""
+    }
+    var mirrorOpen by remember { mutableStateOf(false) }
+    val mirrorLabel = teikengstudio.xmpro.updater.Updater.MIRRORS
+        .firstOrNull { it.first == state.updateMirror }
+        ?.second
+        ?: state.updateMirror.ifBlank { "直连 GitHub" }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Image(
+                painter = painterResource(R.mipmap.ic_launcher_foreground),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(96.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(androidx.compose.ui.graphics.Color(0xFF0D2E20)),
+            )
+            Text(
+                "XMPro",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 14.dp),
+            )
+            Text(
+                if (version.isEmpty()) "版本未知" else "版本 $version",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        GroupTitle("信息")
+        SettingsGroup {
+            SettingsRow(
+                title = "检查更新",
+                subtitle = if (state.updateChecking) "正在连接 GitHub…" else "连接官方仓库获取最新版本",
+                icon = Icons.Filled.Refresh,
+                onClick = { if (!state.updateChecking) onCheckUpdate() },
+            )
+            GroupDivider()
+            SettingsRow(
+                title = "反代加速",
+                subtitle = mirrorLabel,
+                icon = Icons.Filled.SwapHoriz,
+                onClick = { mirrorOpen = true },
+            )
+            GroupDivider()
+            SettingsRow(
+                title = "GitHub 仓库",
+                subtitle = "查看源码与提交记录",
+                icon = Icons.Filled.Code,
+                onClick = { onOpenLink(teikengstudio.xmpro.updater.Updater.WEB_URL) },
+            )
+        }
+        Spacer(Modifier.height(bottomInset))
+    }
+
+    if (mirrorOpen) {
+        AlertDialog(
+            onDismissRequest = { mirrorOpen = false },
+            title = { Text("反代加速") },
+            text = {
+                Column {
+                    Text(
+                        "检查更新与下载安装包时可走镜像，直连较慢时再切换。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    teikengstudio.xmpro.updater.Updater.MIRRORS.forEach { (value, label) ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onMirror(value)
+                                    mirrorOpen = false
+                                }
+                                .padding(vertical = 11.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (state.updateMirror == value) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { mirrorOpen = false }) { Text("关闭") }
+            },
+        )
+    }
+
+    state.updateResult?.let { message ->
+        AlertDialog(
+            onDismissRequest = onDismissResult,
+            title = { Text(if (state.updateUrl != null) "发现更新" else "检查结果") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(message, style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            confirmButton = {
+                val url = state.updateUrl
+                if (url != null) {
+                    TextButton(onClick = {
+                        onOpenLink(url)
+                        onDismissResult()
+                    }) { Text("前往下载") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissResult) { Text("关闭") }
+            },
+        )
     }
 }

@@ -56,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -88,7 +89,7 @@ fun PlayerSheet(
     onSleepTimer: (Int?) -> Unit,
     onSelectQueue: (Int) -> Unit,
     onOpenAlbum: (String) -> Unit = {},
-    onSkipTrim: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
+    onSkipTrim: (Boolean, Int, Int, String) -> Unit = { _, _, _, _ -> },
 ) {
     val track = state.playing
     var queueOpen by remember { mutableStateOf(false) }
@@ -255,6 +256,7 @@ fun PlayerSheet(
                             turningOn,
                             state.introSkipPermille,
                             state.outroSkipPermille,
+                            state.skipTrimMode,
                         )
                         // Switching on also opens the sliders, so the trim can
                         // be adjusted straight away instead of hunting for it
@@ -447,9 +449,10 @@ fun PlayerSheet(
         ) {
             TrimSheet(
                 enabled = state.skipTrimEnabled,
+                mode = state.skipTrimMode,
                 intro = state.introSkipPermille,
                 outro = state.outroSkipPermille,
-                onChange = { on, head, tail -> onSkipTrim(on, head, tail) },
+                onChange = { on, head, tail, next -> onSkipTrim(on, head, tail, next) },
             )
         }
     }
@@ -590,15 +593,17 @@ fun QueueRow(track: Track, active: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Head/tail trim editor, mirroring the launcher-style toggle in settings. */
+/** Head/tail trim editor: automatic silence skipping, or manual percentages. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun TrimSheet(
     enabled: Boolean,
+    mode: String,
     intro: Int,
     outro: Int,
-    onChange: (Boolean, Int, Int) -> Unit,
+    onChange: (Boolean, Int, Int, String) -> Unit,
 ) {
+    val smart = mode == teikengstudio.xmpro.player.SmartSkip.MODE_SMART
     Column(Modifier.padding(horizontal = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -609,29 +614,72 @@ private fun TrimSheet(
             )
             androidx.compose.material3.Switch(
                 checked = enabled,
-                onCheckedChange = { onChange(it, intro, outro) },
+                onCheckedChange = { onChange(it, intro, outro, mode) },
             )
         }
         Text(
-            "按每集时长比例裁剪，百分比会自动换算成本集的秒数。",
+            if (smart) {
+                "自动识别开头的空白与结尾的静音并跳过，无需设置。"
+            } else {
+                "按每集时长比例裁剪，百分比会自动换算成本集的秒数。"
+            },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
-        TrimSlider(
-            title = "片头",
-            permille = intro,
-            enabled = enabled,
-            onChange = { onChange(enabled, it, outro) },
-        )
-        TrimSlider(
-            title = "片尾",
-            permille = outro,
-            enabled = enabled,
-            onChange = { onChange(enabled, intro, it) },
-        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 14.dp)
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(3.dp),
+        ) {
+            listOf(
+                teikengstudio.xmpro.player.SmartSkip.MODE_SMART to "智能",
+                teikengstudio.xmpro.player.SmartSkip.MODE_MANUAL to "手动",
+            ).forEach { (value, label) ->
+                val active = mode == value
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        )
+                        .clickable { onChange(enabled, intro, outro, value) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (active) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+        }
+        if (!smart) {
+            TrimSlider(
+                title = "片头",
+                permille = intro,
+                enabled = enabled,
+                onChange = { onChange(enabled, it, outro, mode) },
+            )
+            TrimSlider(
+                title = "片尾",
+                permille = outro,
+                enabled = enabled,
+                onChange = { onChange(enabled, intro, it, mode) },
+            )
+        }
         TextButton(
-            onClick = { onChange(false, intro, outro) },
+            onClick = { onChange(false, intro, outro, mode) },
             modifier = Modifier.padding(bottom = 12.dp),
         ) {
             Text("关闭跳过头尾")

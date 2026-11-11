@@ -15,9 +15,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val exo = ExoPlayer.Builder(this).build().apply {
-            setHandleAudioBecomingNoisy(true)
-        }
+        val exo = ExoPlayer.Builder(this)
+            .setRenderersFactory(SmartSkip.renderersFactory(this))
+            .build()
+            .apply {
+                setHandleAudioBecomingNoisy(true)
+            }
         player = exo
         session = MediaSession.Builder(this, exo).build()
     }

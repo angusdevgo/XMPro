@@ -419,6 +419,22 @@ class AppContainer(context: Context) {
      * A fixed second count cannot serve both a 3-minute clip and a 40-minute
      * episode, so the trim points follow the track length instead.
      */
+    /** GitHub mirror prefix used by the update check; empty means direct. */
+    fun updateMirror(): String = store.state().optJSONObject("settings")
+        ?.optString("updateMirror") ?: ""
+
+    fun setUpdateMirror(mirror: String) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            settings.put("updateMirror", mirror)
+        }
+    }
+
+    /** `smart` skips silence automatically, `manual` uses the trim points. */
+    fun skipTrimMode(): String = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optString("skipMode")?.takeIf { it.isNotEmpty() }
+        ?: teikengstudio.xmpro.player.SmartSkip.MODE_SMART
+
     /** Whether the trim points are applied at all. */
     fun skipTrimEnabled(): Boolean = store.state().optJSONObject("settings")
         ?.optJSONObject("playback")?.optBoolean("skipTrim", false) ?: false
@@ -429,13 +445,21 @@ class AppContainer(context: Context) {
     fun outroSkipPermille(): Int = store.state().optJSONObject("settings")
         ?.optJSONObject("playback")?.optInt("outroPermille", DEFAULT_SKIP_PERMILLE) ?: DEFAULT_SKIP_PERMILLE
 
-    fun setSkipTrim(enabled: Boolean, intro: Int, outro: Int) {
+    fun setSkipTrim(enabled: Boolean, intro: Int, outro: Int, mode: String) {
         store.transaction { state ->
             val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
             val playback = settings.optJSONObject("playback") ?: org.json.JSONObject().also { settings.put("playback", it) }
             val head = intro.coerceIn(0, MAX_SKIP_PERMILLE)
             val tail = outro.coerceIn(0, MAX_SKIP_PERMILLE)
             playback.put("skipTrim", enabled)
+            playback.put(
+                "skipMode",
+                if (mode == teikengstudio.xmpro.player.SmartSkip.MODE_MANUAL) {
+                    teikengstudio.xmpro.player.SmartSkip.MODE_MANUAL
+                } else {
+                    teikengstudio.xmpro.player.SmartSkip.MODE_SMART
+                },
+            )
             // Never trim past each other: at least a fifth of the track remains.
             playback.put("introPermille", minOf(head, MAX_SKIP_PERMILLE - tail))
             playback.put("outroPermille", minOf(tail, MAX_SKIP_PERMILLE - head))

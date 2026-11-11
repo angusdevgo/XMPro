@@ -84,7 +84,13 @@ data class UiState(
     /** Requested audio quality (auto / m4a_128 / m4a_64 / mp3_32). */
     val quality: String = "auto",
     /** Trim points as per-thousand of each track, so they fit any episode length. */
+    /** About page: mirror choice and the update probe result. */
+    val updateMirror: String = "",
+    val updateChecking: Boolean = false,
+    val updateResult: String? = null,
+    val updateUrl: String? = null,
     val skipTrimEnabled: Boolean = false,
+    val skipTrimMode: String = teikengstudio.xmpro.player.SmartSkip.MODE_SMART,
     val introSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
     val outroSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
     val dynamicColor: Boolean = false,
@@ -134,7 +140,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
             autoClaim = container.autoClaim(),
             bookmarks = container.bookmarks(),
             quality = container.playbackQuality(),
+            updateMirror = container.updateMirror(),
             skipTrimEnabled = container.skipTrimEnabled(),
+            skipTrimMode = container.skipTrimMode(),
             introSkipPermille = container.introSkipPermille(),
             outroSkipPermille = container.outroSkipPermille(),
             dynamicColor = container.dynamicColor(),
@@ -547,14 +555,63 @@ class MainViewModel(private val context: Context, private val container: AppCont
         _state.update { it.copy(quality = quality) }
     }
 
-    fun setSkipTrim(enabled: Boolean = _state.value.skipTrimEnabled, intro: Int = _state.value.introSkipPermille, outro: Int = _state.value.outroSkipPermille) {
+    fun setSkipTrim(
+        enabled: Boolean = _state.value.skipTrimEnabled,
+        intro: Int = _state.value.introSkipPermille,
+        outro: Int = _state.value.outroSkipPermille,
+        mode: String = _state.value.skipTrimMode,
+    ) {
         val head = intro.coerceIn(0, teikengstudio.xmpro.data.MAX_SKIP_PERMILLE)
         val tail = outro.coerceIn(0, teikengstudio.xmpro.data.MAX_SKIP_PERMILLE)
-        runCatching { container.setSkipTrim(enabled, head, tail) }
+        val trimmed = mode.ifEmpty { teikengstudio.xmpro.player.SmartSkip.MODE_SMART }
+        runCatching { container.setSkipTrim(enabled, head, tail, trimmed) }
+        // Smart mode is enforced inside the audio sink, manual mode by seeking.
+        teikengstudio.xmpro.player.SmartSkip.setMode(trimmed)
+        teikengstudio.xmpro.player.SmartSkip.setEnabled(enabled)
         _state.update {
-            it.copy(skipTrimEnabled = enabled, introSkipPermille = head, outroSkipPermille = tail)
+            it.copy(
+                skipTrimEnabled = enabled,
+                skipTrimMode = trimmed,
+                introSkipPermille = head,
+                outroSkipPermille = tail,
+            )
         }
     }
+
+    fun setUpdateMirror(mirror: String) {
+        runCatching { container.setUpdateMirror(mirror) }
+        _state.update { it.copy(updateMirror = mirror, updateResult = null, updateUrl = null) }
+    }
+
+    /** Probes the project's GitHub releases for a newer build. */
+    fun checkUpdate() {
+        if (_state.value.updateChecking) return
+        _state.update { it.copy(updateChecking = true, updateResult = null, updateUrl = null) }
+        val mirror = _state.value.updateMirror
+        val current = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
+        }.getOrDefault("0")
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) { teikengstudio.xmpro.updater.Updater.latest(current, mirror) }
+            }
+            val release = outcome.getOrNull()
+            _state.update {
+                it.copy(
+                    updateChecking = false,
+                    updateResult = release?.let { found ->
+                        val suffix = if (found.notes.isBlank()) "" else "\n\n" + found.notes
+                        "发现新版本 ${found.tag}" + suffix
+                    } ?: (outcome.exceptionOrNull()?.message ?: "检查失败"),
+                    updateUrl = release?.apkUrl ?: release?.pageUrl,
+                )
+            }
+        }
+    }
+
+    fun clearUpdateResult() = _state.update { it.copy(updateResult = null, updateUrl = null) }
+
+    fun openLink(url: String) = teikengstudio.xmpro.updater.Updater.open(context, url)
 
     fun setDynamicColor(enabled: Boolean) {
         runCatching { container.setDynamicColor(enabled) }
@@ -662,7 +719,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     ),
                     seedColor = container.seedColor(),
                     quality = container.playbackQuality(),
+                    updateMirror = container.updateMirror(),
                     skipTrimEnabled = container.skipTrimEnabled(),
+                    skipTrimMode = container.skipTrimMode(),
                     introSkipPermille = container.introSkipPermille(),
                     outroSkipPermille = container.outroSkipPermille(),
                 )
@@ -704,7 +763,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
      */
     private fun introSeekMs(trackSeconds: Double): Long {
         val current = _state.value
-        if (!current.skipTrimEnabled || current.introSkipPermille <= 0) return 0L
+        if (!current.skipTrimEnabled) return 0L
+        if (current.skipTrimMode != teikengstudio.xmpro.player.SmartSkip.MODE_MANUAL) return 0L
+        if (current.introSkipPermille <= 0) return 0L
         val basis = if (trackSeconds > 1) (trackSeconds * 1000).toLong() else current.durationMs
         return basis * current.introSkipPermille / 1000L
     }
@@ -718,7 +779,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 _state.update { it.copy(positionMs = position) }
                 val current = _state.value
                 val duration = current.durationMs
-                val outro = if (current.skipTrimEnabled) duration * current.outroSkipPermille / 1000L else 0L
+                val manual = current.skipTrimEnabled &&
+                    current.skipTrimMode == teikengstudio.xmpro.player.SmartSkip.MODE_MANUAL
+                val outro = if (manual) duration * current.outroSkipPermille / 1000L else 0L
                 if (outro > 0 && duration > outro + 2000L && position >= duration - outro) {
                     // Skip the credits by rolling to the next episode.
                     if (current.queueIndex < current.queue.lastIndex) {
