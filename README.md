@@ -71,7 +71,7 @@ export ANDROID_KEY_PASSWORD=...
 CI（`.github/workflows/android.yml`）在推送 `v*` 标签时用仓库 secrets 签名、校验证书与版本号，
 并把产物发布到 Releases。`sdk.dir` 通过 `android/local.properties` 指定。
 
-`lib/`、`pubspec.yaml`、`test/` 是迁移期的逐行对照参考，不参与构建；迁移前的可构建版本见标签 `flutter-final`。
+迁移前的 Flutter 实现见标签 `flutter-final`，仓库里只保留 Kotlin 工程。
 
 ## 许可
 
