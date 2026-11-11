@@ -8,7 +8,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,13 +18,14 @@ import androidx.compose.runtime.setValue
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.compose.ui.graphics.toArgb
 import teikengstudio.xmpro.ui.ShellScreen
 import teikengstudio.xmpro.ui.theme.XmproTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val container = (application as XmproApp).container
         // Media notifications are how playback survives backgrounding on 13+.
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -43,18 +46,29 @@ class MainActivity : ComponentActivity() {
                 "dark" -> true
                 else -> isSystemInDarkTheme()
             }
-            LaunchedEffect(dark) {
-                WindowCompat.getInsetsController(window, window.decorView).apply {
-                    isAppearanceLightStatusBars = !dark
-                    isAppearanceLightNavigationBars = !dark
-                }
-            }
             XmproTheme(
                 darkTheme = dark,
                 oledBlack = oledBlack,
                 dynamicColor = dynamicColor,
                 seed = seedColor,
             ) {
+                // The window and both system bars take the theme surface colour.
+                // Some ROMs paint an opaque status bar unless a colour is set, and
+                // a transparent one then shows as a black band above the content.
+                val surface = MaterialTheme.colorScheme.surface
+                SideEffect {
+                    @Suppress("DEPRECATION")
+                    window.statusBarColor = surface.toArgb()
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = surface.toArgb()
+                    window.setBackgroundDrawable(
+                        android.graphics.drawable.ColorDrawable(surface.toArgb()),
+                    )
+                    WindowCompat.getInsetsController(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
+                }
                 ShellScreen(
                     container = container,
                     oledBlack = oledBlack,
