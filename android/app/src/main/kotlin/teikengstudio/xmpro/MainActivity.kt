@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
                         oledBlack = it
                         container.setOledBlack(it)
                     },
+                    onThemeModeChange = { themeMode = it },
                     onAppearanceChange = { useDynamic, seed ->
                         dynamicColor = useDynamic
                         seedColor = androidx.compose.ui.graphics.Color(seed)

@@ -65,6 +65,7 @@ fun ShellScreen(
     container: AppContainer,
     oledBlack: Boolean,
     onOledBlackChange: (Boolean) -> Unit,
+    onThemeModeChange: (String) -> Unit = {},
     onAppearanceChange: (dynamic: Boolean, seed: Int) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
@@ -204,6 +205,7 @@ fun ShellScreen(
                         onSignOut = viewModel::signOut,
                         onThemeMode = {
                             themeMode = it
+                            onThemeModeChange(it)
                             viewModel.setThemeMode(it)
                         },
                         onOledBlack = onOledBlackChange,
