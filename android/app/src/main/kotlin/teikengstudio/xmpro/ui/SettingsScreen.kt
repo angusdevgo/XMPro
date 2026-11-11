@@ -108,6 +108,7 @@ fun SettingsScreen(
     onOledBlack: (Boolean) -> Unit,
     onSetPrimary: (String) -> Unit,
     onSwitchAccount: (String) -> Unit,
+    onCopyCookie: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
@@ -155,6 +156,7 @@ fun SettingsScreen(
                 onClaimOnce = onClaimOnce,
                 onRewardTasks = onRewardTasks,
                 onSwitchAccount = onSwitchAccount,
+                onCopyCookie = onCopyCookie,
                 onOpenSocial = onOpenSocial,
             )
 
@@ -172,6 +174,7 @@ fun SettingsScreen(
                         onSignOut = onSignOut,
                         onSetPrimary = onSetPrimary,
                         onSwitchAccount = onSwitchAccount,
+                        onCopyCookie = onCopyCookie,
                         onRemoveAccount = onRemoveAccount,
                         onQueryQuota = onQueryQuota,
                         onClaimOnce = onClaimOnce,
@@ -405,6 +408,7 @@ private fun SettingsRoot(
     onClaimOnce: (String) -> Unit,
     onRewardTasks: (String) -> Unit,
     onSwitchAccount: (String) -> Unit,
+    onCopyCookie: (String) -> Unit,
     onOpenSocial: (String) -> Unit,
 ) {
     Column(
@@ -427,6 +431,7 @@ private fun SettingsRoot(
                 onClaimOnce = onClaimOnce,
                 onRewardTasks = onRewardTasks,
                 onSwitchAccount = onSwitchAccount,
+                onCopyCookie = onCopyCookie,
                 onOpenSocial = onOpenSocial,
             )
         }
@@ -478,6 +483,7 @@ private fun ProfileHeader(
     onClaimOnce: (String) -> Unit,
     onRewardTasks: (String) -> Unit,
     onSwitchAccount: (String) -> Unit,
+    onCopyCookie: (String) -> Unit,
     onOpenSocial: (String) -> Unit,
 ) {
     var switchOpen by remember { mutableStateOf(false) }
@@ -984,6 +990,7 @@ private fun AccountContent(
     onSignOut: () -> Unit,
     onSetPrimary: (String) -> Unit,
     onSwitchAccount: (String) -> Unit,
+    onCopyCookie: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
@@ -1009,6 +1016,7 @@ private fun AccountContent(
                     onSetPrimary = onSetPrimary,
                     onSwitch = onSwitchAccount,
                     onRemove = onRemoveAccount,
+                    onCopyCookie = onCopyCookie,
                 )
             }
         }
@@ -1025,6 +1033,12 @@ private fun AccountContent(
             title = "同步账号资料",
             subtitle = "从喜马拉雅拉取昵称、头像与关注粉丝数",
             onClick = onSyncProfile,
+        )
+        GroupDivider()
+        ActionRow(
+            title = "复制登录信息",
+            subtitle = "导出本账号 Cookie，可粘贴到其他设备的 Cookie 导入",
+            onClick = { onCopyCookie(current.identity) },
         )
         GroupDivider()
         ActionRow(
@@ -1212,6 +1226,7 @@ private fun AccountCard(
     onSetPrimary: (String) -> Unit,
     onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
+    onCopyCookie: (String) -> Unit,
 ) {
     Column(
         Modifier
@@ -1281,6 +1296,9 @@ private fun AccountCard(
                 // account only offers switching.
                 TextButton(onClick = { onSwitch(account.identity) }, enabled = !busy) {
                     Text("切换到该账号", maxLines = 1, softWrap = false)
+                }
+                TextButton(onClick = { onCopyCookie(account.identity) }, enabled = !busy) {
+                    Text("复制登录信息", maxLines = 1, softWrap = false)
                 }
                 // Destructive action is an icon so it never competes for label width.
                 IconButton(onClick = { onRemove(account.identity) }, enabled = !busy) {

@@ -756,6 +756,34 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     fun openLink(url: String) = teikengstudio.xmpro.updater.Updater.open(context, url)
 
+    /**
+     * Copies the account's login cookie so it can be pasted into another device.
+     *
+     * Marked sensitive so the system does not preview the token on screen.
+     */
+    fun copyCookie(identity: String) {
+        viewModelScope.launch {
+            try {
+                val text = withContext(Dispatchers.IO) { container.exportCookie(identity) }
+                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("XMPro 登录信息", text).apply {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        description.extras = android.os.PersistableBundle().apply {
+                            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+                        }
+                    }
+                }
+                clipboard.setPrimaryClip(clip)
+                _state.update {
+                    it.copy(message = "已复制登录信息，可粘贴到其他设备的 Cookie 导入")
+                }
+            } catch (error: Exception) {
+                _state.update { it.copy(message = describe(error)) }
+            }
+        }
+    }
+
     /** Applies the volume immediately and remembers it for the next track. */
     fun setVolume(volume: Float) {
         val level = volume.coerceIn(0f, 1f)

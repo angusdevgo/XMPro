@@ -212,6 +212,7 @@ fun ShellScreen(
                         onOledBlack = onOledBlackChange,
                         onSetPrimary = viewModel::setPrimaryAccount,
                         onSwitchAccount = viewModel::switchAccount,
+                        onCopyCookie = viewModel::copyCookie,
                         onRemoveAccount = viewModel::removeAccount,
                         onQueryQuota = viewModel::queryQuota,
                         onClaimOnce = viewModel::claimOnce,

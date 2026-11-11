@@ -183,6 +183,19 @@ class AppContainer(context: Context) {
      * The primary account only decides the default owner of new data, so
      * switching must not silently promote the target as well.
      */
+    /**
+     * Login material for moving an account to another device.
+     *
+     * The cookie keeps the original device id, so the other device is treated as
+     * the same client. That matters because the listening balance is per device,
+     * not per account.
+     */
+    fun exportCookie(identity: String): String {
+        val credential = credentials.load(identity)
+            ?: throw XmlyException("missing_account", "该账号的登录信息已失效，请重新登录")
+        return credential.cookie
+    }
+
     fun switchAccount(identity: String) {
         if (credentials.load(identity) == null) throw XmlyException("missing_account", "请先登录该账号")
         if (activeAccount == identity) return
