@@ -43,6 +43,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
@@ -98,7 +100,7 @@ fun SettingsScreen(
     onSyncProfile: () -> Unit,
     onRenameAccount: (String, String) -> Unit,
     onQuality: (String) -> Unit,
-    onSkipSeconds: (Int, Int) -> Unit,
+    onSkipTrim: (Boolean, Int, Int) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onSeedColor: (Int) -> Unit,
     onOpenSocial: (String) -> Unit,
@@ -186,25 +188,37 @@ fun SettingsScreen(
                         )
                     }
                     SettingsGroup {
-                        GroupTitle("跳过片头")
-                        ChoiceRow(
-                            options = listOf(0 to "不跳过", 5 to "5 秒", 10 to "10 秒", 15 to "15 秒", 30 to "30 秒"),
-                            selected = state.introSkipSeconds,
-                            onSelect = { onSkipSeconds(it, state.outroSkipSeconds) },
+                        SettingSwitchRow(
+                            title = "跳过片头片尾",
+                            subtitle = "按比例裁掉开头与结尾，不同长度的声音都适用",
+                            checked = state.skipTrimEnabled,
+                            onCheckedChange = { onSkipTrim(it, state.introSkipPermille, state.outroSkipPermille) },
                         )
-                        GroupDivider()
-                        GroupTitle("跳过片尾")
-                        ChoiceRow(
-                            options = listOf(0 to "不跳过", 10 to "10 秒", 15 to "15 秒", 30 to "30 秒", 45 to "45 秒"),
-                            selected = state.outroSkipSeconds,
-                            onSelect = { onSkipSeconds(state.introSkipSeconds, it) },
-                        )
-                        Text(
-                            "开头从设定秒数开始播放；片尾到达设定秒数前自动切下一集。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        )
+                    }
+                    if (state.skipTrimEnabled) {
+                        SettingsGroup {
+                            SkipSlider(
+                                title = "片头",
+                                permille = state.introSkipPermille,
+                                onValueChange = {
+                                    onSkipTrim(true, it, state.outroSkipPermille)
+                                },
+                            )
+                            GroupDivider()
+                            SkipSlider(
+                                title = "片尾",
+                                permille = state.outroSkipPermille,
+                                onValueChange = {
+                                    onSkipTrim(true, state.introSkipPermille, it)
+                                },
+                            )
+                            Text(
+                                "百分比按每集实际时长换算；片尾到点后自动切下一集。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
                     }
                     Spacer(Modifier.height(bottomInset))
                 }
@@ -1490,4 +1504,71 @@ private fun themeLabel(mode: String): String = when (mode) {
     "light" -> "浅色"
     "dark" -> "深色"
     else -> "跟随系统"
+}
+
+/** Row with a title, an explanation and a switch. */
+@Composable
+private fun SettingSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * Trim point as a share of the track rather than a fixed number of seconds, so
+ * one setting fits a 3-minute clip and a 40-minute episode alike.
+ */
+@Composable
+private fun SkipSlider(title: String, permille: Int, onValueChange: (Int) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Spacer(Modifier.weight(1f))
+            Text(
+                percentLabel(permille),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = permille.toFloat(),
+            onValueChange = { onValueChange(it.roundToInt()) },
+            valueRange = 0f..teikengstudio.xmpro.data.MAX_SKIP_PERMILLE.toFloat(),
+        )
+    }
+}
+
+/** `30` per-mille reads as "+0:18 / 10 分钟 · 3%". */
+private fun percentLabel(permille: Int): String {
+    val percent = permille / 10.0
+    val seconds = permille * 6 / 10 // per-mille of a 10-minute reference episode
+    return if (permille == 0) {
+        "不跳过"
+    } else {
+        "%.1f%% · 10 分钟约 %d 秒".format(percent, seconds)
+    }
 }

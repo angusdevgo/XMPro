@@ -83,8 +83,10 @@ data class UiState(
     val bookmarks: List<teikengstudio.xmpro.data.Bookmark> = emptyList(),
     /** Requested audio quality (auto / m4a_128 / m4a_64 / mp3_32). */
     val quality: String = "auto",
-    val introSkipSeconds: Int = 0,
-    val outroSkipSeconds: Int = 0,
+    /** Trim points as per-thousand of each track, so they fit any episode length. */
+    val skipTrimEnabled: Boolean = false,
+    val introSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
+    val outroSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
     val dynamicColor: Boolean = false,
     val seedColor: Int = 0xFFE57373.toInt(),
     /** Open social sheet: null closed, otherwise 关注 / 粉丝 / 订阅 / 收藏. */
@@ -132,8 +134,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
             autoClaim = container.autoClaim(),
             bookmarks = container.bookmarks(),
             quality = container.playbackQuality(),
-            introSkipSeconds = container.introSkipSeconds(),
-            outroSkipSeconds = container.outroSkipSeconds(),
+            skipTrimEnabled = container.skipTrimEnabled(),
+            introSkipPermille = container.introSkipPermille(),
+            outroSkipPermille = container.outroSkipPermille(),
             dynamicColor = container.dynamicColor(),
             seedColor = container.seedColor(),
         ),
@@ -437,7 +440,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     sessionTrack = resolved.track
                     sessionStartedAt = System.currentTimeMillis()
                     _state.update { it.copy(playing = resolved.track) }
-                    val intro = _state.value.introSkipSeconds * 1000L
+                    val intro = introSeekMs(resolved.track.duration)
                     val seek = if (resumePositionMs > 0) resumePositionMs else intro
                     if (seek > 0) playback.seekTo(seek)
                 }
@@ -542,9 +545,13 @@ class MainViewModel(private val context: Context, private val container: AppCont
         _state.update { it.copy(quality = quality) }
     }
 
-    fun setSkipSeconds(intro: Int, outro: Int) {
-        runCatching { container.setSkipSeconds(intro, outro) }
-        _state.update { it.copy(introSkipSeconds = intro, outroSkipSeconds = outro) }
+    fun setSkipTrim(enabled: Boolean = _state.value.skipTrimEnabled, intro: Int = _state.value.introSkipPermille, outro: Int = _state.value.outroSkipPermille) {
+        val head = intro.coerceIn(0, teikengstudio.xmpro.data.MAX_SKIP_PERMILLE)
+        val tail = outro.coerceIn(0, teikengstudio.xmpro.data.MAX_SKIP_PERMILLE)
+        runCatching { container.setSkipTrim(enabled, head, tail) }
+        _state.update {
+            it.copy(skipTrimEnabled = enabled, introSkipPermille = head, outroSkipPermille = tail)
+        }
     }
 
     fun setDynamicColor(enabled: Boolean) {
@@ -653,8 +660,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     ),
                     seedColor = container.seedColor(),
                     quality = container.playbackQuality(),
-                    introSkipSeconds = container.introSkipSeconds(),
-                    outroSkipSeconds = container.outroSkipSeconds(),
+                    skipTrimEnabled = container.skipTrimEnabled(),
+                    introSkipPermille = container.introSkipPermille(),
+                    outroSkipPermille = container.outroSkipPermille(),
                 )
             }
         }
@@ -686,6 +694,19 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
+    /**
+     * Where the configured intro trim lands, or 0 when it is off.
+     *
+     * [trackSeconds] is the catalogue duration, which is known before playback
+     * starts; the running player has no duration yet at that point.
+     */
+    private fun introSeekMs(trackSeconds: Double): Long {
+        val current = _state.value
+        if (!current.skipTrimEnabled || current.introSkipPermille <= 0) return 0L
+        val basis = if (trackSeconds > 1) (trackSeconds * 1000).toLong() else current.durationMs
+        return basis * current.introSkipPermille / 1000L
+    }
+
     private fun startTicker() {
         if (ticker?.isActive == true) return
         ticker = viewModelScope.launch {
@@ -694,9 +715,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 val position = playback.currentPosition()
                 _state.update { it.copy(positionMs = position) }
                 val current = _state.value
-                val outro = current.outroSkipSeconds * 1000L
                 val duration = current.durationMs
-                if (outro > 0 && duration > outro && position >= duration - outro) {
+                val outro = if (current.skipTrimEnabled) duration * current.outroSkipPermille / 1000L else 0L
+                if (outro > 0 && duration > outro + 2000L && position >= duration - outro) {
                     // Skip the credits by rolling to the next episode.
                     if (current.queueIndex < current.queue.lastIndex) {
                         playQueue(current.queue, current.queueIndex + 1)

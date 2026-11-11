@@ -11,8 +11,6 @@
 
 <br/>
 
-<img src="assets/screenshots/home.png" alt="首页" width="300">
-
 ## 简介
 
 XMPro 是基于**喜马拉雅**内容的第三方 Android 收听客户端，界面与交互参考了

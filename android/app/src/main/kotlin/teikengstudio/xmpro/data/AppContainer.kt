@@ -16,6 +16,12 @@ import java.io.File
  * Process-wide service graph. Everything is created lazily so an unused service
  * never touches disk, network or the keystore.
  */
+/** Trim points are stored per-thousand of the track; this caps each side. */
+const val MAX_SKIP_PERMILLE = 400
+
+/** Default trim per side when the feature is switched on: 3% of the track. */
+const val DEFAULT_SKIP_PERMILLE = 30
+
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
 
@@ -407,18 +413,32 @@ class AppContainer(context: Context) {
         }
     }
 
-    fun introSkipSeconds(): Int = store.state().optJSONObject("settings")
-        ?.optJSONObject("playback")?.optInt("introSkip", 0) ?: 0
+    /**
+     * Skip points as a share of the track, in per-thousand.
+     *
+     * A fixed second count cannot serve both a 3-minute clip and a 40-minute
+     * episode, so the trim points follow the track length instead.
+     */
+    /** Whether the trim points are applied at all. */
+    fun skipTrimEnabled(): Boolean = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optBoolean("skipTrim", false) ?: false
 
-    fun outroSkipSeconds(): Int = store.state().optJSONObject("settings")
-        ?.optJSONObject("playback")?.optInt("outroSkip", 0) ?: 0
+    fun introSkipPermille(): Int = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optInt("introPermille", DEFAULT_SKIP_PERMILLE) ?: DEFAULT_SKIP_PERMILLE
 
-    fun setSkipSeconds(intro: Int, outro: Int) {
+    fun outroSkipPermille(): Int = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optInt("outroPermille", DEFAULT_SKIP_PERMILLE) ?: DEFAULT_SKIP_PERMILLE
+
+    fun setSkipTrim(enabled: Boolean, intro: Int, outro: Int) {
         store.transaction { state ->
             val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
             val playback = settings.optJSONObject("playback") ?: org.json.JSONObject().also { settings.put("playback", it) }
-            playback.put("introSkip", intro.coerceIn(0, 120))
-            playback.put("outroSkip", outro.coerceIn(0, 120))
+            val head = intro.coerceIn(0, MAX_SKIP_PERMILLE)
+            val tail = outro.coerceIn(0, MAX_SKIP_PERMILLE)
+            playback.put("skipTrim", enabled)
+            // Never trim past each other: at least a fifth of the track remains.
+            playback.put("introPermille", minOf(head, MAX_SKIP_PERMILLE - tail))
+            playback.put("outroPermille", minOf(tail, MAX_SKIP_PERMILLE - head))
         }
     }
 

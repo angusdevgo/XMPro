@@ -218,7 +218,7 @@ fun ShellScreen(
                         onSyncProfile = { viewModel.syncProfiles(manual = true) },
                         onRenameAccount = viewModel::renameAccount,
                         onQuality = viewModel::setQuality,
-                        onSkipSeconds = viewModel::setSkipSeconds,
+                        onSkipTrim = viewModel::setSkipTrim,
                         onDynamicColor = viewModel::setDynamicColor,
                         onSeedColor = viewModel::setSeedColor,
                         onOpenSocial = viewModel::openSocial,
