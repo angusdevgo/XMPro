@@ -48,6 +48,8 @@ data class UiState(
     val durationMs: Long = 0,
     val message: String? = null,
     val channels: List<HomeChannel> = emptyList(),
+    /** Channels the user removed from the header; editable in the channel sheet. */
+    val hiddenChannels: List<HomeChannel> = emptyList(),
     val channelId: Int = 0,
     val tabs: List<HomeTab> = emptyList(),
     val tabId: Int? = null,
@@ -75,10 +77,24 @@ data class UiState(
     val speed: Float = 1f,
     val sleepAtMillis: Long? = null,
     val bookmarks: List<teikengstudio.xmpro.data.Bookmark> = emptyList(),
+    /** Requested audio quality (auto / m4a_128 / m4a_64 / mp3_32). */
+    val quality: String = "auto",
+    val introSkipSeconds: Int = 0,
+    val outroSkipSeconds: Int = 0,
+    val dynamicColor: Boolean = false,
+    val seedColor: Int = 0xFFE57373.toInt(),
+    /** Open social sheet: null closed, otherwise 关注 / 粉丝 / 订阅 / 收藏. */
+    /** Anchor homepage overlay opened from a following / fans row. */
+    val userPage: teikengstudio.xmpro.model.UserPage? = null,
+    val userLoading: Boolean = false,
+    val userError: String? = null,
+    val socialKind: String? = null,
+    val socialUsers: List<teikengstudio.xmpro.model.SocialUser> = emptyList(),
+    val socialLoading: Boolean = false,
     val favoriteIds: Set<String> = emptySet(),
 )
 
-class MainViewModel(context: Context, private val container: AppContainer) : ViewModel() {
+class MainViewModel(private val context: Context, private val container: AppContainer) : ViewModel() {
     private var ticker: Job? = null
     private val playback = container.playback
     private val login = XmlyLogin(deviceOverride = container.deviceId)
@@ -98,6 +114,11 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
             accounts = initialAccounts,
             autoClaim = container.autoClaim(),
             bookmarks = container.bookmarks(),
+            quality = container.playbackQuality(),
+            introSkipSeconds = container.introSkipSeconds(),
+            outroSkipSeconds = container.outroSkipSeconds(),
+            dynamicColor = container.dynamicColor(),
+            seedColor = container.seedColor(),
         ),
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -136,15 +157,83 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
                     XmlyExperience(container.client(container.activeAccount))
                 }
                 val channels = withContext(Dispatchers.IO) { experience.channels() }
-                val selected = _state.value.channelId.takeIf { id -> channels.any { it.pageId == id } }
-                    ?: channels.firstOrNull()?.pageId
-                    ?: throw XmlyException("invalid_home", "首页频道为空")
-                _state.update { it.copy(channels = channels, channelId = selected) }
+                if (channels.isEmpty()) throw XmlyException("invalid_home", "首页频道为空")
+                val (visible, hidden) = splitChannels(channels)
+                val selected = _state.value.channelId.takeIf { id -> visible.any { it.pageId == id } }
+                    ?: visible.first().pageId
+                _state.update {
+                    it.copy(channels = visible, hiddenChannels = hidden, channelId = selected)
+                }
                 loadChannel(experience, selected, null)
             } catch (error: Exception) {
                 _state.update { it.copy(homeLoading = false, homeError = describe(error)) }
             }
         }
+    }
+
+    /**
+     * Applies the stored order/hidden lists to the freshly fetched channels.
+     * A channel the server dropped is simply ignored, and hiding everything is
+     * treated as "show all" so the header can never end up empty.
+     */
+    private fun splitChannels(all: List<HomeChannel>): Pair<List<HomeChannel>, List<HomeChannel>> {
+        val (order, hidden) = container.channelPreferences()
+        val byId = all.associateBy { it.pageId }
+        val ordered = order.mapNotNull { byId[it] } + all.filter { it.pageId !in order }
+        val visible = ordered.filter { it.pageId !in hidden }
+        if (visible.isEmpty()) return ordered to emptyList()
+        return visible to ordered.filter { it.pageId in hidden }
+    }
+
+    private fun persistChannelLayout(visible: List<HomeChannel>, hidden: List<HomeChannel>) {
+        runCatching {
+            container.setChannelPreferences(
+                order = (visible + hidden).map { it.pageId },
+                hidden = hidden.map { it.pageId }.toSet(),
+            )
+        }
+    }
+
+    /** Moves a header channel by [delta] slots (-1 left, +1 right). */
+    fun moveChannel(pageId: Int, delta: Int) {
+        val current = _state.value
+        val list = current.channels.toMutableList()
+        val index = list.indexOfFirst { it.pageId == pageId }
+        val target = index + delta
+        if (index < 0 || target !in list.indices) return
+        list.add(target, list.removeAt(index))
+        persistChannelLayout(list, current.hiddenChannels)
+        _state.update { it.copy(channels = list) }
+    }
+
+    /** Removes a channel from the header; the last one cannot be removed. */
+    fun hideChannel(pageId: Int) {
+        val current = _state.value
+        if (current.channels.size <= 1) {
+            _state.update { it.copy(message = "至少保留一个频道") }
+            return
+        }
+        val channel = current.channels.firstOrNull { it.pageId == pageId } ?: return
+        val visible = current.channels - channel
+        val hidden = current.hiddenChannels + channel
+        persistChannelLayout(visible, hidden)
+        _state.update { it.copy(channels = visible, hiddenChannels = hidden) }
+        if (current.channelId == pageId) selectChannel(visible.first().pageId)
+    }
+
+    fun showChannel(pageId: Int) {
+        val current = _state.value
+        val channel = current.hiddenChannels.firstOrNull { it.pageId == pageId } ?: return
+        val hidden = current.hiddenChannels - channel
+        val visible = current.channels + channel
+        persistChannelLayout(visible, hidden)
+        _state.update { it.copy(channels = visible, hiddenChannels = hidden) }
+    }
+
+    /** Drops the stored customisation and restores the server order. */
+    fun resetChannels() {
+        runCatching { container.setChannelPreferences(emptyList(), emptySet()) }
+        loadHome()
     }
 
     fun selectChannel(pageId: Int) {
@@ -255,19 +344,24 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
     /** Plays [track] inside [queue] so next/previous walk the same list. */
     fun playQueue(queue: List<Track>, index: Int, resumePositionMs: Long = 0) {
         val track = queue.getOrNull(index) ?: return
+        // Report the outgoing track before the player swaps media.
+        if (sessionTrack != null && sessionTrack?.id != track.id) syncProgress()
         _state.update {
             it.copy(message = null, queue = queue, queueIndex = index)
         }
         viewModelScope.launch {
             try {
+                val quality = _state.value.quality
                 val resolved = withContext(Dispatchers.IO) {
-                    container.client(container.activeAccount).resolve(track.number)
+                    container.client(container.activeAccount).resolve(track.number, quality)
                 }
                 playback.start(resolved.url, resolved.track.title) {
                     sessionTrack = resolved.track
                     sessionStartedAt = System.currentTimeMillis()
                     _state.update { it.copy(playing = resolved.track) }
-                    if (resumePositionMs > 0) playback.seekTo(resumePositionMs)
+                    val intro = _state.value.introSkipSeconds * 1000L
+                    val seek = if (resumePositionMs > 0) resumePositionMs else intro
+                    if (seek > 0) playback.seekTo(seek)
                 }
             } catch (error: Exception) {
                 _state.update { it.copy(message = describe(error)) }
@@ -345,31 +439,170 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
     fun togglePlayback() {
         val wasPlaying = _state.value.isPlaying
         playback.toggle()
-        if (wasPlaying) syncHistory()
+        if (wasPlaying) {
+            // Pausing ends one listening interval; resuming starts a new one.
+            syncProgress()
+            sessionStartedAt = System.currentTimeMillis()
+        }
     }
 
     fun seekTo(positionMs: Long) = playback.seekTo(positionMs)
 
     fun stopPlayback() {
-        syncHistory()
+        syncProgress()
+        sessionTrack = null
+        sessionStartedAt = 0
         playback.stop()
         ticker?.cancel()
         _state.update { it.copy(playing = null) }
     }
 
-    /** Best-effort cloud progress write; failures are never retried here. */
-    private fun syncHistory() {
+    // ---------------------------------------------------------------- settings
+
+    fun setQuality(quality: String) {
+        runCatching { container.setPlaybackQuality(quality) }
+        _state.update { it.copy(quality = quality) }
+    }
+
+    fun setSkipSeconds(intro: Int, outro: Int) {
+        runCatching { container.setSkipSeconds(intro, outro) }
+        _state.update { it.copy(introSkipSeconds = intro, outroSkipSeconds = outro) }
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        runCatching { container.setDynamicColor(enabled) }
+        _state.update { it.copy(dynamicColor = enabled) }
+    }
+
+    // -------------------------------------------------------------------- user
+
+    /** Opens an anchor homepage; needs no session. */
+    fun openUser(uid: String) {
+        if (uid.isEmpty()) return
+        _state.update { it.copy(userPage = null, userLoading = true, userError = null) }
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    XmlyExperience(container.client(container.activeAccount)).userPage(uid)
+                }
+            }
+            _state.update {
+                it.copy(
+                    userPage = result.getOrNull(),
+                    userLoading = false,
+                    userError = result.exceptionOrNull()?.let { error -> describe(error) },
+                )
+            }
+        }
+    }
+
+    fun closeUser() {
+        _state.update { it.copy(userPage = null, userLoading = false, userError = null) }
+    }
+
+    // ------------------------------------------------------------------ social
+
+    /** Opens the 我的 sheet for [kind] and fetches its list. */
+    fun openSocial(kind: String) {
+        _state.update {
+            it.copy(socialKind = kind, socialUsers = emptyList(), socialLoading = kind == "following" || kind == "fans")
+        }
+        if (kind != "following" && kind != "fans") return
+        val uid = _state.value.accounts.firstOrNull { it.active }?.uid
+            ?: _state.value.accounts.firstOrNull { it.primary }?.uid
+            ?: return
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val experience = XmlyExperience(container.client(container.activeAccount))
+                    if (kind == "following") experience.following(uid) else experience.fans(uid)
+                }
+            }
+            _state.update {
+                it.copy(
+                    socialUsers = result.getOrDefault(emptyList()),
+                    socialLoading = false,
+                    message = result.exceptionOrNull()?.let { error -> describe(error) },
+                )
+            }
+        }
+    }
+
+    fun closeSocial() {
+        _state.update { it.copy(socialKind = null, socialUsers = emptyList(), socialLoading = false) }
+    }
+
+    // ------------------------------------------------------------------ backup
+
+    fun exportBackup(uri: android.net.Uri, includeCredentials: Boolean) {
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    teikengstudio.xmpro.data.BackupManager(container)
+                        .export(context.contentResolver, uri, includeCredentials)
+                }
+            }
+            _state.update {
+                it.copy(
+                    message = result.fold(
+                        onSuccess = { bytes -> "已导出备份（${bytes / 1024} KB）" },
+                        onFailure = { error -> "导出失败：${describe(error)}" },
+                    ),
+                )
+            }
+        }
+    }
+
+    fun importBackup(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    teikengstudio.xmpro.data.BackupManager(container)
+                        .import(context.contentResolver, uri)
+                }
+            }
+            result.onSuccess {
+                refreshAccounts()
+                refreshBookmarks()
+                refreshListening()
+            }
+            _state.update {
+                it.copy(
+                    accounts = container.accounts(),
+                    message = result.fold(
+                        onSuccess = { value -> "已恢复备份（${value.accounts} 个账号）" },
+                        onFailure = { error -> "恢复失败：${describe(error)}" },
+                    ),
+                    seedColor = container.seedColor(),
+                    quality = container.playbackQuality(),
+                    introSkipSeconds = container.introSkipSeconds(),
+                    outroSkipSeconds = container.outroSkipSeconds(),
+                )
+            }
+        }
+    }
+
+    fun setSeedColor(argb: Int) {
+        runCatching { container.setSeedColor(argb) }
+        _state.update { it.copy(seedColor = argb) }
+    }
+
+    /**
+     * Pushes the current position of [sessionTrack] to the cloud history.
+     * Called on pause, track change, and from the ticker, so a killed process
+     * loses at most one interval of progress.
+     */
+    private fun syncProgress() {
         val track = sessionTrack ?: return
         val started = sessionStartedAt
-        val position = playback.currentPosition()
-        sessionTrack = null
-        if (started <= 0 || position <= 0) return
-        val identity = container.activeAccount ?: return
+        if (started <= 0) return
+        val position = playback.currentPosition() / 1000.0
+        val endedAt = System.currentTimeMillis()
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    XmlyHistory(container.client(identity))
-                        .sync(track, position / 1000.0, started, System.currentTimeMillis())
+                    XmlyHistory(container.client(container.activeAccount))
+                        .sync(track, position, started.coerceAtLeast(1), endedAt)
                 }
             }
         }
@@ -378,8 +611,26 @@ class MainViewModel(context: Context, private val container: AppContainer) : Vie
     private fun startTicker() {
         if (ticker?.isActive == true) return
         ticker = viewModelScope.launch {
+            var sinceSync = 0
             while (isActive) {
-                _state.update { it.copy(positionMs = playback.currentPosition()) }
+                val position = playback.currentPosition()
+                _state.update { it.copy(positionMs = position) }
+                val current = _state.value
+                val outro = current.outroSkipSeconds * 1000L
+                val duration = current.durationMs
+                if (outro > 0 && duration > outro && position >= duration - outro) {
+                    // Skip the credits by rolling to the next episode.
+                    if (current.queueIndex < current.queue.lastIndex) {
+                        playQueue(current.queue, current.queueIndex + 1)
+                    } else {
+                        playback.toggle()
+                    }
+                }
+                sinceSync += 500
+                if (sinceSync >= 60_000) {
+                    sinceSync = 0
+                    syncProgress()
+                }
                 delay(500)
             }
         }

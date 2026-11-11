@@ -162,6 +162,9 @@ class AppContainer(context: Context) {
                     nickname = record.optString("localName").ifEmpty { record.optString("nickname") },
                     avatarUrl = record.optString("avatar").takeIf { it.isNotEmpty() },
                     mobile = record.optString("mobile"),
+                    followers = record.optInt("followers", -1).takeIf { it >= 0 },
+                    following = record.optInt("following", -1).takeIf { it >= 0 },
+                    subscriptionCount = record.optInt("subscriptionCount", -1).takeIf { it >= 0 },
                 )
             }
             .sortedWith(compareByDescending<AccountSummary> { it.primary }.thenByDescending { it.active })
@@ -205,6 +208,9 @@ class AppContainer(context: Context) {
             if (profile.nickname.isNotEmpty()) record.put("nickname", profile.nickname)
             profile.avatarUrl?.let { record.put("avatar", it) }
             if (profile.intro.isNotEmpty()) record.put("intro", profile.intro)
+            profile.followers?.let { record.put("followers", it) }
+            profile.following?.let { record.put("following", it) }
+            profile.subscriptions?.let { record.put("subscriptionCount", it) }
         }
         return profile
     }
@@ -362,7 +368,117 @@ class AppContainer(context: Context) {
         }
     }
 
+    /** Android 12+ wallpaper palette switch. */
+    fun dynamicColor(): Boolean =
+        store.state().optJSONObject("settings")?.optJSONObject("appearance")?.optBoolean("dynamicColor")
+            ?: false
+
+    fun setDynamicColor(enabled: Boolean) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            val appearance = settings.optJSONObject("appearance") ?: org.json.JSONObject().also { settings.put("appearance", it) }
+            appearance.put("dynamicColor", enabled)
+        }
+    }
+
+    /** Seed colour packed as ARGB; the coral default matches the old client. */
+    fun seedColor(): Int = store.state().optJSONObject("settings")
+        ?.optJSONObject("appearance")?.optInt("seedColor", 0)?.takeIf { it != 0 } ?: 0xFFE57373.toInt()
+
+    fun setSeedColor(argb: Int) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            val appearance = settings.optJSONObject("appearance") ?: org.json.JSONObject().also { settings.put("appearance", it) }
+            appearance.put("seedColor", argb)
+        }
+    }
+
+    // ---------------------------------------------------------------- playback
+
+    /** Requested audio quality: auto, m4a_128, m4a_64 or mp3_32. */
+    fun playbackQuality(): String = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optString("quality")?.takeIf { it.isNotEmpty() } ?: "auto"
+
+    fun setPlaybackQuality(quality: String) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            val playback = settings.optJSONObject("playback") ?: org.json.JSONObject().also { settings.put("playback", it) }
+            playback.put("quality", quality)
+        }
+    }
+
+    fun introSkipSeconds(): Int = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optInt("introSkip", 0) ?: 0
+
+    fun outroSkipSeconds(): Int = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optInt("outroSkip", 0) ?: 0
+
+    fun setSkipSeconds(intro: Int, outro: Int) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            val playback = settings.optJSONObject("playback") ?: org.json.JSONObject().also { settings.put("playback", it) }
+            playback.put("introSkip", intro.coerceIn(0, 120))
+            playback.put("outroSkip", outro.coerceIn(0, 120))
+        }
+    }
+
+    /** Home channel order and the channels the user hid, as stored. */
+    fun channelPreferences(): Pair<List<Int>, Set<Int>> {
+        val node = store.state().optJSONObject("settings")?.optJSONObject("homeChannels")
+        val order = buildList {
+            val array = node?.optJSONArray("order") ?: return@buildList
+            for (index in 0 until array.length()) {
+                val id = array.optInt(index, 0)
+                if (id != 0) add(id)
+            }
+        }
+        val hidden = buildSet {
+            val array = node?.optJSONArray("hidden") ?: return@buildSet
+            for (index in 0 until array.length()) {
+                val id = array.optInt(index, 0)
+                if (id != 0) add(id)
+            }
+        }
+        return order to hidden
+    }
+
+    fun setChannelPreferences(order: List<Int>, hidden: Set<Int>) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings")
+                ?: org.json.JSONObject().also { state.put("settings", it) }
+            val node = org.json.JSONObject()
+            node.put("order", org.json.JSONArray(order))
+            node.put("hidden", org.json.JSONArray(hidden.toList()))
+            settings.put("homeChannels", node)
+        }
+    }
+
     fun close() {
         store.close()
+    }
+
+    // ------------------------------------------------------------------ backup
+
+    /** Snapshot used by the backup exporter. */
+    fun storageState(): org.json.JSONObject = store.state()
+
+    fun credentialIdentities(): List<String> = credentials.identities()
+
+    fun credentialsFor(identity: String): teikengstudio.xmpro.model.Credentials? = credentials.load(identity)
+
+    fun saveCredentials(value: teikengstudio.xmpro.model.Credentials) = credentials.save(value)
+
+    /** Replaces the whole state tree with a validated backup payload. */
+    fun replaceState(next: org.json.JSONObject) {
+        store.transaction { current ->
+            val keys = current.keys().asSequence().toList()
+            for (key in keys) current.remove(key)
+            for (key in next.keys()) current.put(key, next.get(key))
+        }
+        loadActiveAccount()
+    }
+
+    fun loadActiveAccount() {
+        activeAccount = store.state().optString("activeAccountId").takeIf { it.isNotEmpty() && credentials.load(it) != null }
     }
 }

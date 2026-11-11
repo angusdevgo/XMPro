@@ -1,5 +1,19 @@
 package teikengstudio.xmpro.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -26,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,12 +51,17 @@ private enum class Destination { Home, Listening, Settings }
 
 private val navItems = listOf(
     FloatingNavItem("主页", Icons.Filled.Home, Icons.Outlined.Home),
-    FloatingNavItem("听过", Icons.Filled.Headphones, Icons.Outlined.Headphones),
-    FloatingNavItem("设置", Icons.Filled.Settings, Icons.Outlined.Settings),
+    FloatingNavItem("听书", Icons.Filled.Headphones, Icons.Outlined.Headphones),
+    FloatingNavItem("我的", Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
 @Composable
-fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: (Boolean) -> Unit) {
+fun ShellScreen(
+    container: AppContainer,
+    oledBlack: Boolean,
+    onOledBlackChange: (Boolean) -> Unit,
+    onAppearanceChange: (dynamic: Boolean, seed: Int) -> Unit = { _, _ -> },
+) {
     val context = LocalContext.current
     val viewModel: MainViewModel = viewModel { MainViewModel(context, container) }
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -51,19 +71,42 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
     val snackbar = remember { SnackbarHostState() }
     val selected = Destination.entries[selectedIndex]
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    // Idle the bar offers "尚未选择声音 / 打开播放器"; settings keeps a clean
-    // list instead, and any real playback always shows the bar.
-    val playerVisible = state.playingTitle != null || selected != Destination.Settings
-    // An opened album is an overlay above whichever tab started it, so 听过 and
-    // 下载 can open albums too and come back to their own list.
+    // The mini player only exists while a track is loaded, so an untouched app
+    // has no idle placeholder bar floating above the nav pill.
+    val playerVisible = state.playingTitle != null
+    // An opened album is an overlay above whichever tab started it, so 听过 can
+    // open albums too and come back to its own list.
     val albumOpen = state.album != null || state.albumLoading || state.albumError != null
+    val userOpen = state.userPage != null || state.userLoading || state.userError != null
     // The content scrolls under the floating bars, so it needs matching bottom room.
     val contentBottom = navBottom + 88.dp + if (playerVisible) 76.dp else 0.dp
+
+    // PiliPlus style: bars retract while the user reads down a list and return
+    // on the first upward drag (or when playback starts / a page changes).
+    var barsHidden by remember { mutableStateOf(false) }
+    val barsAlpha by animateFloatAsState(
+        targetValue = if (barsHidden) 0f else 1f,
+        animationSpec = tween(durationMillis = 220),
+        label = "barsAlpha",
+    )
+    val barsOffset by animateFloatAsState(
+        targetValue = if (barsHidden) 140f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "barsOffset",
+    )
+    val barsVisible = !barsHidden
 
     LaunchedEffect(Unit) {
         if (state.channels.isEmpty()) viewModel.loadHome()
         viewModel.refreshListening()
         viewModel.refreshBookmarks()
+    }
+
+    LaunchedEffect(state.dynamicColor, state.seedColor) {
+        onAppearanceChange(state.dynamicColor, state.seedColor)
     }
 
     LaunchedEffect(state.message) {
@@ -72,25 +115,35 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
         viewModel.dismissMessage()
     }
 
+    // Any navigation resets the retracted state so the bar never stays lost.
+    LaunchedEffect(selectedIndex, albumOpen, userOpen, playerOpen) {
+        barsHidden = false
+    }
+
+    BackHandler(enabled = playerOpen || albumOpen || userOpen || selected != Destination.Home) {
+        when {
+            playerOpen -> playerOpen = false
+            albumOpen -> viewModel.closeAlbum()
+            userOpen -> viewModel.closeUser()
+            selected != Destination.Home -> selectedIndex = 0
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
-        // Content fills the screen and scrolls under the floating bars; each
-        // screen adds `contentBottom` as list padding so the last row clears them.
         Box(
             Modifier
                 .fillMaxSize()
                 .statusBarsPadding(),
         ) {
-            if (albumOpen) {
-                AlbumScreen(
-                    state = state,
-                    bottomInset = contentBottom,
-                    onBack = viewModel::closeAlbum,
-                    onPlay = viewModel::playAlbum,
-                    onSubscribe = viewModel::setSubscribed,
-                )
-            } else when (selected) {
-                Destination.Home -> {
-                    HomeScreen(
+            AnimatedContent(
+                targetState = selected,
+                transitionSpec = {
+                    fadeIn(tween(200)) togetherWith fadeOut(tween(140))
+                },
+                label = "tabTransition",
+            ) { destination ->
+                when (destination) {
+                    Destination.Home -> HomeScreen(
                         state = state,
                         bottomInset = contentBottom,
                         onSearch = viewModel::search,
@@ -98,99 +151,182 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
                         onRefreshHome = viewModel::loadHome,
                         onOpenAlbum = viewModel::openAlbum,
                         onPlay = { viewModel.play(it) },
-                            onSelectChannel = viewModel::selectChannel,
+                        onSelectChannel = viewModel::selectChannel,
                         onSelectTab = viewModel::selectTab,
+                        onMoveChannel = viewModel::moveChannel,
+                        onHideChannel = viewModel::hideChannel,
+                        onShowChannel = viewModel::showChannel,
+                        onResetChannels = viewModel::resetChannels,
+                        barsVisible = barsVisible,
+                        onBarsHidden = { barsHidden = it },
+                    )
+
+                    Destination.Listening -> ListeningScreen(
+                        state = state,
+                        bottomInset = contentBottom,
+                        onRefresh = viewModel::refreshListening,
+                        onOpenAlbum = viewModel::openAlbum,
+                        onPlay = { track, positionMs ->
+                            if (positionMs > 0) {
+                                viewModel.play(track, positionMs)
+                            } else {
+                                viewModel.playUpdates(track)
+                            }
+                        },
+                        onUnsubscribe = { viewModel.setSubscribed(it, false) },
+                        onUnfavorite = { viewModel.setFavorite(it, false) },
+                        onLoadMoreUpdates = viewModel::loadMoreUpdates,
+                        onLoadMoreSubscriptions = viewModel::loadMoreSubscriptions,
+                        onLoadMoreFavorites = viewModel::loadMoreFavorites,
+                        onRemoveBookmark = viewModel::removeBookmark,
+                        barsVisible = barsVisible,
+                        onBarsHidden = { barsHidden = it },
+                    )
+
+                    Destination.Settings -> SettingsScreen(
+                        state = state,
+                        bottomInset = contentBottom,
+                        themeMode = themeMode,
+                        oledBlack = oledBlack,
+                        onSignIn = viewModel::signIn,
+                        onSignOut = viewModel::signOut,
+                        onThemeMode = {
+                            themeMode = it
+                            viewModel.setThemeMode(it)
+                        },
+                        onOledBlack = onOledBlackChange,
+                        onSetPrimary = viewModel::setPrimaryAccount,
+                        onRemoveAccount = viewModel::removeAccount,
+                        onQueryQuota = viewModel::queryQuota,
+                        onClaimOnce = viewModel::claimOnce,
+                        onResumeRewards = viewModel::resumeRewards,
+                        onAutoClaim = viewModel::setAutoClaim,
+                        onSyncProfile = { viewModel.syncProfiles(manual = true) },
+                        onRenameAccount = viewModel::renameAccount,
+                        onQuality = viewModel::setQuality,
+                        onSkipSeconds = viewModel::setSkipSeconds,
+                        onDynamicColor = viewModel::setDynamicColor,
+                        onSeedColor = viewModel::setSeedColor,
+                        onOpenSocial = viewModel::openSocial,
+                        onCloseSocial = viewModel::closeSocial,
+                        onOpenUser = viewModel::openUser,
+                        onExportBackup = viewModel::exportBackup,
+                        onImportBackup = viewModel::importBackup,
+                        smsLogin = remember(viewModel) {
+                            SmsLoginCallbacks(
+                                captchaId = viewModel.geetestConfig()["captcha_id"] as String,
+                                sendSms = { mobile, fields, done ->
+                                    viewModel.sendSms(mobile, fields, done)
+                                },
+                                verifySms = { challenge, code, primary, done ->
+                                    viewModel.verifySms(challenge, code, primary, done)
+                                },
+                                cancel = viewModel::cancelSmsLogin,
+                            )
+                        },
                     )
                 }
+            }
 
-                Destination.Listening -> ListeningScreen(
+            AnimatedVisibility(
+                visible = userOpen,
+                enter = slideInHorizontally(
+                    animationSpec = tween(durationMillis = 260),
+                    initialOffsetX = { it / 4 },
+                ) + fadeIn(tween(200)),
+                exit = slideOutHorizontally(
+                    animationSpec = tween(durationMillis = 200),
+                    targetOffsetX = { it / 4 },
+                ) + fadeOut(tween(160)),
+            ) {
+                UserScreen(
                     state = state,
                     bottomInset = contentBottom,
-                    onRefresh = viewModel::refreshListening,
-                    onOpenAlbum = viewModel::openAlbum,
-                    onPlay = { track, positionMs ->
-                        if (positionMs > 0) {
-                            viewModel.play(track, positionMs)
-                        } else {
-                            viewModel.playUpdates(track)
-                        }
+                    onBack = viewModel::closeUser,
+                    onOpenAlbum = { albumId ->
+                        viewModel.closeUser()
+                        viewModel.openAlbum(albumId)
                     },
-                    onUnsubscribe = { viewModel.setSubscribed(it, false) },
-                    onUnfavorite = { viewModel.setFavorite(it, false) },
-                    onLoadMoreUpdates = viewModel::loadMoreUpdates,
-                    onLoadMoreSubscriptions = viewModel::loadMoreSubscriptions,
-                    onLoadMoreFavorites = viewModel::loadMoreFavorites,
-                    onRemoveBookmark = viewModel::removeBookmark,
                 )
+            }
 
-                Destination.Settings -> SettingsScreen(
+            AnimatedVisibility(
+                visible = albumOpen,
+                enter = slideInHorizontally(
+                    animationSpec = tween(durationMillis = 260),
+                    initialOffsetX = { it / 4 },
+                ) + fadeIn(tween(200)),
+                exit = slideOutHorizontally(
+                    animationSpec = tween(durationMillis = 200),
+                    targetOffsetX = { it / 4 },
+                ) + fadeOut(tween(160)),
+            ) {
+                AlbumScreen(
                     state = state,
                     bottomInset = contentBottom,
-                    themeMode = themeMode,
-                    oledBlack = oledBlack,
-                    onSignIn = viewModel::signIn,
-                    onSignOut = viewModel::signOut,
-                    onThemeMode = {
-                        themeMode = it
-                        viewModel.setThemeMode(it)
-                    },
-                    onOledBlack = onOledBlackChange,
-                    onSetPrimary = viewModel::setPrimaryAccount,
-                    onRemoveAccount = viewModel::removeAccount,
-                    onQueryQuota = viewModel::queryQuota,
-                    onClaimOnce = viewModel::claimOnce,
-                    onResumeRewards = viewModel::resumeRewards,
-                    onAutoClaim = viewModel::setAutoClaim,
-                    onSyncProfile = { viewModel.syncProfiles(manual = true) },
-                    onRenameAccount = viewModel::renameAccount,
-                    smsLogin = remember(viewModel) {
-                        SmsLoginCallbacks(
-                            captchaId = viewModel.geetestConfig()["captcha_id"] as String,
-                            sendSms = { mobile, fields, done ->
-                                viewModel.sendSms(mobile, fields, done)
-                            },
-                            verifySms = { challenge, code, primary, done ->
-                                viewModel.verifySms(challenge, code, primary, done)
-                            },
-                            cancel = viewModel::cancelSmsLogin,
-                        )
-                    },
+                    onBack = viewModel::closeAlbum,
+                    onPlay = viewModel::playAlbum,
+                    onSubscribe = viewModel::setSubscribed,
                 )
             }
         }
 
         SnackbarHost(
             hostState = snackbar,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = contentBottom),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = contentBottom),
         )
 
         if (playerOpen) {
-            PlayerSheet(
-                state = state,
-                onDismiss = { playerOpen = false },
-                onToggle = viewModel::togglePlayback,
-                onStop = {
-                    viewModel.stopPlayback()
-                    playerOpen = false
-                },
-                onNext = viewModel::next,
-                onPrevious = viewModel::previous,
-                onSkip = viewModel::skipBy,
-                onSeek = viewModel::seekTo,
-                onCycleSpeed = viewModel::cycleSpeed,
-                onFavorite = viewModel::toggleFavoriteOfPlaying,
-                isFavorite = state.playing?.let { track -> track.id in state.favoriteIds } == true,
-                onBookmark = viewModel::saveBookmark,
-                onSleepTimer = viewModel::setSleepTimer,
-                onSelectQueue = { index ->
-                    viewModel.playQueue(state.queue, index)
-                },
-            )
-            return@Box
+            AnimatedVisibility(
+                visible = playerOpen,
+                enter = slideInVertically(
+                    animationSpec = tween(durationMillis = 300),
+                    initialOffsetY = { it },
+                ) + fadeIn(tween(200)),
+                exit = slideOutVertically(
+                    animationSpec = tween(durationMillis = 220),
+                    targetOffsetY = { it },
+                ) + fadeOut(tween(160)),
+            ) {
+                PlayerSheet(
+                    state = state,
+                    onDismiss = { playerOpen = false },
+                    onToggle = viewModel::togglePlayback,
+                    onStop = {
+                        viewModel.stopPlayback()
+                        playerOpen = false
+                    },
+                    onNext = viewModel::next,
+                    onPrevious = viewModel::previous,
+                    onSkip = viewModel::skipBy,
+                    onSeek = viewModel::seekTo,
+                    onCycleSpeed = viewModel::cycleSpeed,
+                    onFavorite = viewModel::toggleFavoriteOfPlaying,
+                    isFavorite = state.playing?.let { track -> track.id in state.favoriteIds } == true,
+                    onBookmark = viewModel::saveBookmark,
+                    onSleepTimer = viewModel::setSleepTimer,
+                    onSelectQueue = { index ->
+                        viewModel.playQueue(state.queue, index)
+                    },
+                    onOpenAlbum = { albumId ->
+                        playerOpen = false
+                        viewModel.openAlbum(albumId)
+                    },
+                )
+            }
         }
 
-        Column(
-            modifier = Modifier.align(Alignment.BottomCenter),
+        // The now-playing page owns the screen: the mini player and the nav pill
+        // would only cover its transport controls.
+        if (!playerOpen) Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .graphicsLayer {
+                    translationY = barsOffset / 1.6f
+                    alpha = barsAlpha
+                },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (playerVisible) PlayerBar(
@@ -201,6 +337,7 @@ fun ShellScreen(container: AppContainer, oledBlack: Boolean, onOledBlackChange: 
             )
             FloatingBottomBar(
                 items = navItems,
+                topPadding = if (playerVisible && !playerOpen) 2.dp else 12.dp,
                 selectedIndex = selectedIndex,
                 onItemSelected = { index ->
                     if (Destination.entries[index] != Destination.Home) viewModel.closeAlbum()

@@ -1,5 +1,6 @@
 package teikengstudio.xmpro.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,16 +11,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Favorite
@@ -35,13 +37,12 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -54,7 +55,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import teikengstudio.xmpro.model.Track
@@ -80,12 +83,17 @@ fun PlayerSheet(
     isFavorite: Boolean,
     onSleepTimer: (Int?) -> Unit,
     onSelectQueue: (Int) -> Unit,
+    onOpenAlbum: (String) -> Unit = {},
 ) {
     val track = state.playing
     var queueOpen by remember { mutableStateOf(false) }
     var timerOpen by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableFloatStateOf(-1f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    BackHandler {
+        if (queueOpen) queueOpen = false else if (timerOpen) timerOpen = false else onDismiss()
+    }
 
     Box(
         Modifier
@@ -94,38 +102,49 @@ fun PlayerSheet(
             .statusBarsPadding()
             .navigationBarsPadding(),
     ) {
-        // Scrollable so every control stays reachable on short screens.
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 24.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "收起")
                 }
-                Text(
-                    "正在收听",
+                Column(
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        "正在收听",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 IconButton(onClick = { queueOpen = true }) {
                     Icon(Icons.Filled.PlaylistPlay, contentDescription = "播放列表")
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 val cover = track?.coverUrl
                 if (cover != null) {
-                    Cover(cover, 232)
+                    Box(
+                        Modifier
+                            .shadow(elevation = 18.dp, shape = RoundedCornerShape(28.dp), clip = false),
+                    ) {
+                        Cover(cover, 260)
+                    }
                 } else {
                     Box(
                         Modifier
-                            .size(232.dp)
-                            .clip(RoundedCornerShape(24.dp))
+                            .size(260.dp)
+                            .clip(RoundedCornerShape(28.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -133,51 +152,78 @@ fun PlayerSheet(
                             Icons.Filled.PlayArrow,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(72.dp),
+                            modifier = Modifier.size(80.dp),
                         )
                     }
                 }
             }
+
             Text(
                 track?.title ?: "尚未选择声音",
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 18.dp),
+                    .padding(top = 22.dp),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                textAlign = TextAlign.Center,
             )
             Text(
                 listOfNotNull(track?.album?.takeIf { it.isNotEmpty() }, track?.artist?.takeIf { it.isNotEmpty() })
                     .joinToString(" · "),
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .then(
+                        if (track?.albumKey?.isNotEmpty() == true) {
+                            Modifier.clickable { onOpenAlbum(track.albumKey) }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                textAlign = TextAlign.Center,
             )
 
             Row(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
-                horizontalArrangement = Arrangement.Center,
+                Modifier.fillMaxWidth().padding(top = 14.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onCycleSpeed) {
-                    Text("%.2f×".format(state.speed).replace(".00", ".0").replace(".50", ".5"))
-                }
-                IconButton(onClick = onFavorite, enabled = track != null) {
-                    Icon(
-                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = if (isFavorite) "取消收藏" else "收藏",
-                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = onBookmark, enabled = track != null) {
-                    Icon(Icons.Filled.BookmarkBorder, contentDescription = "保存书签")
-                }
+                PlayerActionButton(
+                    label = "%.1f×".format(state.speed),
+                    active = state.speed != 1f,
+                    onClick = onCycleSpeed,
+                )
+                PlayerActionIcon(
+                    icon = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    label = if (isFavorite) "已收藏" else "收藏",
+                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    enabled = track != null,
+                    onClick = onFavorite,
+                )
+                PlayerActionIcon(
+                    icon = Icons.Filled.BookmarkBorder,
+                    label = "书签",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    enabled = track != null,
+                    onClick = onBookmark,
+                )
+                PlayerActionIcon(
+                    icon = Icons.Filled.Timer,
+                    label = state.sleepAtMillis?.let { "已定时" } ?: "定时",
+                    tint = if (state.sleepAtMillis != null) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    enabled = true,
+                    onClick = { timerOpen = true },
+                )
             }
 
             val total = state.durationMs.coerceAtLeast(0)
@@ -194,9 +240,11 @@ fun PlayerSheet(
                     }
                 },
                 enabled = total > 0,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
             )
-            Row(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                 Text(
                     formatDuration(shown / 1000.0),
                     style = MaterialTheme.typography.labelSmall,
@@ -211,8 +259,8 @@ fun PlayerSheet(
             }
 
             Row(
-                Modifier.fillMaxWidth().padding(top = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = { onSkip(-10_000) }) {
@@ -223,13 +271,13 @@ fun PlayerSheet(
                 }
                 FilledIconButton(
                     onClick = onToggle,
-                    modifier = Modifier.size(72.dp),
+                    modifier = Modifier.size(74.dp),
                     shape = CircleShape,
                 ) {
                     Icon(
                         if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = if (state.isPlaying) "暂停" else "播放",
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(38.dp),
                     )
                 }
                 IconButton(onClick = onNext) {
@@ -240,69 +288,115 @@ fun PlayerSheet(
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+            Spacer(Modifier.height(16.dp))
+            Surface(
+                onClick = { queueOpen = true },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                TextButton(onClick = { timerOpen = true }) {
-                    Icon(Icons.Filled.Timer, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("  定时关闭", style = MaterialTheme.typography.labelLarge)
-                }
-                TextButton(onClick = { queueOpen = true }) {
-                    Icon(Icons.Filled.PlaylistPlay, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("  播放列表", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.PlaylistPlay,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "待播列表",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "${state.queue.size} 集",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(20.dp))
         }
     }
 
     if (queueOpen) {
         ModalBottomSheet(onDismissRequest = { queueOpen = false }, sheetState = sheetState) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     "待播列表 · ${state.queue.size} 集",
                     style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onStop) { Text("清空") }
             }
             LazyColumn(Modifier.navigationBarsPadding()) {
                 itemsIndexed(state.queue) { index, item ->
-                    ListItem(
-                        headlineContent = {
-                            Text(
-                                item.title.ifEmpty { item.number },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = if (index == state.queueIndex) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                            )
-                        },
-                        supportingContent = {
-                            Text(
-                                listOfNotNull(
-                                    item.album.takeIf { it.isNotEmpty() },
-                                    formatDuration(item.duration),
-                                ).joinToString(" · "),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingContent = if (index == state.queueIndex) {
-                            { Text("正在播放", style = MaterialTheme.typography.labelSmall) }
-                        } else {
-                            null
-                        },
-                        modifier = Modifier.clickable {
+                    val active = index == state.queueIndex
+                    Surface(
+                        onClick = {
                             onSelectQueue(index)
                             queueOpen = false
                         },
-                    )
-                    HorizontalDivider()
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (active) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 3.dp),
+                    ) {
+                        Row(
+                            Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Cover(item.coverUrl, 42)
+                            Column(
+                                Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 10.dp),
+                            ) {
+                                Text(
+                                    item.title.ifEmpty { item.number },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (active) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                                Text(
+                                    listOfNotNull(
+                                        item.album.takeIf { it.isNotEmpty() },
+                                        formatDuration(item.duration),
+                                    ).joinToString(" · "),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            if (active) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = "正在播放",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -312,7 +406,7 @@ fun PlayerSheet(
         AlertDialog(
             onDismissRequest = { timerOpen = false },
             title = { Text("定时关闭") },
-            text = { Text("到达时间后停止播放；当前设置会显示在下方。") },
+            text = { Text("到达时间后停止播放；当前设置会显示在操作栏。") },
             confirmButton = {
                 TextButton(onClick = {
                     onSleepTimer(30)
@@ -335,18 +429,102 @@ fun PlayerSheet(
     }
 }
 
+@Composable
+private fun PlayerActionButton(
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .background(
+                if (active) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                },
+            )
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (active) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
+
+@Composable
+private fun PlayerActionIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: androidx.compose.ui.graphics.Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerLow),
+        ) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = tint,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
 /** Compact preview used by tests/previews. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun QueueRow(track: Track, active: Boolean, onClick: () -> Unit) {
-    ListItem(
-        headlineContent = { Text(track.title.ifEmpty { track.number }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = { Text(formatDuration(track.duration)) },
-        modifier = Modifier.clickable(onClick = onClick).padding(0.dp),
-        trailingContent = if (active) {
-            { Icon(Icons.Filled.PlayArrow, contentDescription = "正在播放") }
-        } else {
-            null
-        },
-    )
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp),
+    ) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    track.title.ifEmpty { track.number },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    formatDuration(track.duration),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (active) {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = "正在播放",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
 }

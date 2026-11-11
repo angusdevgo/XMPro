@@ -24,6 +24,11 @@ class AccountSummary(
     val nickname: String = "",
     val avatarUrl: String? = null,
     val mobile: String = "",
+    /** Null until the official profile has been read once. */
+    val followers: Int? = null,
+    val following: Int? = null,
+    /** Server side subscription count; null until the profile was read. */
+    val subscriptionCount: Int? = null,
 ) {
     val balance: Quota? = quota?.let {
         runCatching {

@@ -1,33 +1,50 @@
 package teikengstudio.xmpro.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -41,116 +58,290 @@ fun AlbumScreen(
     onPlay: (Track) -> Unit,
     onSubscribe: (String, Boolean) -> Unit,
 ) {
+    BackHandler(onBack = onBack)
+
     val page = state.album
     val album = page?.album
     val subscribed = album != null && state.subscriptions.any { it.album.id == album.id }
-    Column(Modifier.fillMaxSize()) {
+    var expandIntro by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
             }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    album?.title ?: "专辑",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                album?.let {
-                    Text(
-                        listOfNotNull(
-                            it.artist.takeIf { artist -> artist.isNotEmpty() },
-                            "${it.total} 集",
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-        if (album != null) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AssistChip(
-                    onClick = { onSubscribe(album.id, !subscribed) },
-                    label = { Text(if (subscribed) "已订阅" else "订阅") },
-                )
-                AssistChip(
-                    onClick = { page.tracks.firstOrNull()?.let(onPlay) },
-                    label = { Text("播放第 1 集") },
-                    leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                )
-            }
-            if (album.intro.isNotEmpty()) {
-                Text(
-                    album.intro,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-        }
-        if (state.albumLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        state.albumError?.let {
             Text(
-                it,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                album?.title ?: "专辑详情",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
         }
-        if (page != null) {
+
+        if (state.albumLoading) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(2.dp)
+                    .clip(CircleShape),
+            )
+        }
+        state.albumError?.let {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                )
+            }
+        }
+
+        if (page != null && album != null) {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = bottomInset),
+                contentPadding = PaddingValues(top = 4.dp, bottom = bottomInset),
             ) {
-                items(page.tracks, key = { it.id }) { track ->
-                    ListItem(
-                        headlineContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                track.orderNo?.let { number ->
+                item(key = "album-hero") {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Cover(
+                                    url = album.coverUrl ?: page.tracks.firstOrNull()?.coverUrl,
+                                    size = 96,
+                                )
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(start = 14.dp),
+                                ) {
                                     Text(
-                                        "$number. ",
+                                        album.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        listOfNotNull(
+                                            album.artist.takeIf { it.isNotEmpty() },
+                                            "共 ${page.total.coerceAtLeast(album.total)} 集",
+                                        ).joinToString(" · "),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 6.dp),
+                                    )
+                                    if (album.intro.isNotEmpty()) {
+                                        Text(
+                                            album.intro,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = if (expandIntro) 12 else 3,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 8.dp)
+                                                .clickable { expandIntro = !expandIntro },
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.padding(top = 14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Button(
+                                    onClick = { page.tracks.firstOrNull()?.let(onPlay) },
+                                    shape = CircleShape,
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.PlayArrow,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        "播放第 1 集",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        maxLines = 1,
                                     )
                                 }
+                                if (subscribed) {
+                                    OutlinedButton(
+                                        onClick = { onSubscribe(album.id, false) },
+                                        shape = CircleShape,
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            "已订阅",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                } else {
+                                    FilledTonalButton(
+                                        onClick = { onSubscribe(album.id, true) },
+                                        shape = CircleShape,
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Add,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            "订阅",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item(key = "episodes-header") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .width(4.dp)
+                                .height(15.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "剧集列表",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "(共 ${page.total.coerceAtLeast(page.tracks.size)} 集)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                itemsIndexed(page.tracks, key = { _, track -> track.id }) { index, track ->
+                    val active = state.playing?.id == track.id
+                    val order = track.orderNo ?: (index + 1)
+                    Surface(
+                        onClick = { onPlay(track) },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (active) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier.width(34.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (active) {
+                                    Icon(
+                                        Icons.Filled.GraphicEq,
+                                        contentDescription = "正在播放",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                } else {
+                                    Text(
+                                        "%02d".format(order),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 10.dp),
+                            ) {
                                 Text(
                                     track.title.ifEmpty { track.number },
                                     style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = if (active) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                Text(
+                                    formatDuration(track.duration),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 3.dp),
+                                )
                             }
-                        },
-                        supportingContent = { Text(formatDuration(track.duration)) },
-                        leadingContent = { Cover(track.coverUrl ?: page.album.coverUrl, 44) },
-                        trailingContent = {
-                            IconButton(onClick = { onPlay(track) }) {
-                                Icon(Icons.Filled.PlayArrow, contentDescription = "播放")
+                            FilledTonalIconButton(
+                                onClick = { onPlay(track) },
+                                modifier = Modifier.size(34.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = "播放",
+                                    modifier = Modifier.size(18.dp),
+                                )
                             }
-                        },
-                        modifier = Modifier.clickable { onPlay(track) },
-                    )
-                    HorizontalDivider()
-                }
-                item {
-                    Text(
-                        "共 ${page.total} 集",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    )
+                        }
+                    }
                 }
             }
         } else if (!state.albumLoading && state.albumError == null) {

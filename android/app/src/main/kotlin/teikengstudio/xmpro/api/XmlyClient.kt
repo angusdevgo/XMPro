@@ -28,7 +28,7 @@ import teikengstudio.xmpro.model.xmlyPositive
 class XmlyClient(
     private val http: XmlyHttp = XmlyHttp(),
     val credentials: Credentials? = null,
-    private val clock: () -> Instant = { Instant.now() },
+    private val clock: () -> Instant = { Instant.ofEpochMilli(ServerClock.now()) },
     private val mobile: String = MOBILE,
     private val searchOrigin: String = XmlyHttp.SEARCH_ORIGIN,
 ) : QuotaSource {

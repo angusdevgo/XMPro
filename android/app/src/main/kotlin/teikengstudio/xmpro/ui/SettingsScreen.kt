@@ -1,10 +1,15 @@
 package teikengstudio.xmpro.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,17 +31,19 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayCircleOutline
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,8 +55,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -58,12 +71,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import teikengstudio.xmpro.data.AccountSummary
+import teikengstudio.xmpro.ui.theme.SeedPresets
 
-private enum class SettingsPage { Root, Account, Appearance, About }
+private enum class SettingsPage { Root, Account, Playback, Appearance, Backup, About }
 
 /**
- * Grouped settings: a menu root with one page per topic, mirroring the
- * previous client's information architecture instead of one long scroll.
+ * "我的" tab: the personal summary on top, then one page per topic. Every page
+ * keeps the same rounded card grouping so the whole tab reads as one surface.
  */
 @Composable
 fun SettingsScreen(
@@ -83,6 +97,15 @@ fun SettingsScreen(
     onAutoClaim: (Boolean) -> Unit,
     onSyncProfile: () -> Unit,
     onRenameAccount: (String, String) -> Unit,
+    onQuality: (String) -> Unit,
+    onSkipSeconds: (Int, Int) -> Unit,
+    onDynamicColor: (Boolean) -> Unit,
+    onSeedColor: (Int) -> Unit,
+    onOpenSocial: (String) -> Unit,
+    onCloseSocial: () -> Unit,
+    onOpenUser: (String) -> Unit,
+    onExportBackup: (android.net.Uri, Boolean) -> Unit,
+    onImportBackup: (android.net.Uri) -> Unit,
     smsLogin: SmsLoginCallbacks,
 ) {
     var page by remember { mutableStateOf(SettingsPage.Root) }
@@ -93,6 +116,8 @@ fun SettingsScreen(
         ?: state.accounts.firstOrNull { it.primary }
         ?: state.accounts.firstOrNull()
 
+    BackHandler(enabled = page != SettingsPage.Root) { page = SettingsPage.Root }
+
     Column(Modifier.fillMaxSize()) {
         when (page) {
             SettingsPage.Root -> SettingsRoot(
@@ -101,11 +126,19 @@ fun SettingsScreen(
                 themeMode = themeMode,
                 bottomInset = bottomInset,
                 onNavigate = { page = it },
+                onQueryQuota = onQueryQuota,
+                onClaimOnce = onClaimOnce,
+                onOpenSocial = onOpenSocial,
             )
 
             SettingsPage.Account -> {
-                PageHeader("账号", onBack = { page = SettingsPage.Root })
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                PageHeader("账号与听时", onBack = { page = SettingsPage.Root })
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp),
+                ) {
                     AccountContent(
                         state = state,
                         current = current,
@@ -125,52 +158,152 @@ fun SettingsScreen(
                 }
             }
 
-            SettingsPage.Appearance -> {
-                PageHeader("外观", onBack = { page = SettingsPage.Root })
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    ListItem(
-                        headlineContent = { Text("主题") },
-                        supportingContent = { Text(themeLabel(themeMode)) },
-                        trailingContent = {
-                            Row {
-                                for (mode in listOf("system", "light", "dark")) {
-                                    TextButton(onClick = { onThemeMode(mode) }) {
-                                        Text(if (themeMode == mode) "● ${themeLabel(mode)}" else themeLabel(mode))
-                                    }
-                                }
-                            }
-                        },
-                    )
-                    HorizontalDivider()
-                    ListItem(
-                        headlineContent = { Text("OLED 纯黑") },
-                        supportingContent = { Text("暗色模式下使用纯黑背景") },
-                        trailingContent = { Switch(checked = oledBlack, onCheckedChange = onOledBlack) },
-                    )
+            SettingsPage.Playback -> {
+                PageHeader("播放设置", onBack = { page = SettingsPage.Root })
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp),
+                ) {
+                    SettingsGroup {
+                        GroupTitle("音质")
+                        ChoiceRow(
+                            options = listOf(
+                                "auto" to "自动",
+                                "m4a_128" to "高清",
+                                "m4a_64" to "标准",
+                                "mp3_32" to "流畅",
+                            ),
+                            selected = state.quality,
+                            onSelect = onQuality,
+                        )
+                        Text(
+                            "高清优先使用 AAC 128k；会员/听时权限不足时回落到可用码率。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                    SettingsGroup {
+                        GroupTitle("跳过片头")
+                        ChoiceRow(
+                            options = listOf(0 to "不跳过", 5 to "5 秒", 10 to "10 秒", 15 to "15 秒", 30 to "30 秒"),
+                            selected = state.introSkipSeconds,
+                            onSelect = { onSkipSeconds(it, state.outroSkipSeconds) },
+                        )
+                        GroupDivider()
+                        GroupTitle("跳过片尾")
+                        ChoiceRow(
+                            options = listOf(0 to "不跳过", 10 to "10 秒", 15 to "15 秒", 30 to "30 秒", 45 to "45 秒"),
+                            selected = state.outroSkipSeconds,
+                            onSelect = { onSkipSeconds(state.introSkipSeconds, it) },
+                        )
+                        Text(
+                            "开头从设定秒数开始播放；片尾到达设定秒数前自动切下一集。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
                     Spacer(Modifier.height(bottomInset))
                 }
             }
 
+            SettingsPage.Appearance -> {
+                PageHeader("外观", onBack = { page = SettingsPage.Root })
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp),
+                ) {
+                    SettingsGroup {
+                        GroupTitle("主题模式")
+                        ChoiceRow(
+                            options = listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"),
+                            selected = themeMode,
+                            onSelect = onThemeMode,
+                        )
+                    }
+                    SettingsGroup {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("动态取色", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "使用系统壁纸配色（Android 12 及以上）",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            Switch(checked = state.dynamicColor, onCheckedChange = onDynamicColor)
+                        }
+                    }
+                    SettingsGroup {
+                        GroupTitle("预设主题")
+                        SeedSwatches(
+                            selected = state.seedColor,
+                            enabled = !state.dynamicColor,
+                            onSelect = onSeedColor,
+                        )
+                    }
+                    SettingsGroup {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("OLED 纯黑", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "暗色模式下使用纯黑背景",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            Switch(checked = oledBlack, onCheckedChange = onOledBlack)
+                        }
+                    }
+                    Spacer(Modifier.height(bottomInset))
+                }
+            }
+
+            SettingsPage.Backup -> {
+                PageHeader("备份与恢复", onBack = { page = SettingsPage.Root })
+                BackupPage(
+                    bottomInset = bottomInset,
+                    onExport = onExportBackup,
+                    onImport = onImportBackup,
+                )
+            }
+
             SettingsPage.About -> {
                 PageHeader("关于", onBack = { page = SettingsPage.Root })
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    ListItem(
-                        headlineContent = { Text("XMPro") },
-                        supportingContent = { Text("喜马拉雅第三方客户端 · Kotlin + Compose 重构版") },
-                    )
-                    HorizontalDivider()
-                    ListItem(
-                        headlineContent = { Text("数据目录") },
-                        supportingContent = { Text("应用专属外部存储，卸载后一并删除") },
-                    )
-                    ListItem(
-                        headlineContent = { Text("许可") },
-                        supportingContent = { Text("AGPL-3.0-or-later；界面参考 PiliPlus（GPL-3.0）") },
-                    )
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp),
+                ) {
+                    SettingsGroup {
+                        InfoRow("XMPro", "喜马拉雅第三方客户端 · Kotlin + Compose 重构版")
+                        GroupDivider()
+                        InfoRow("数据目录", "应用专属外部存储，卸载后一并删除")
+                        GroupDivider()
+                        InfoRow("许可", "AGPL-3.0-or-later；界面参考 PiliPlus（GPL-3.0）")
+                    }
                     Spacer(Modifier.height(bottomInset))
                 }
             }
         }
+    }
+
+    state.socialKind?.let { kind ->
+        SocialSheet(kind = kind, state = state, onDismiss = onCloseSocial, onOpenUser = onOpenUser)
     }
 
     renameTarget?.let { identity ->
@@ -213,34 +346,398 @@ private fun SettingsRoot(
     themeMode: String,
     bottomInset: Dp,
     onNavigate: (SettingsPage) -> Unit,
+    onQueryQuota: (String) -> Unit,
+    onClaimOnce: (String) -> Unit,
+    onOpenSocial: (String) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+    ) {
         Text(
-            "设置",
+            "我的",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp),
+            modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 10.dp),
         )
-        SettingsRow(
-            title = "账号",
-            subtitle = current?.let { it.nickname.ifEmpty { "账号 ${it.uid}" } + if (it.primary) " · 主账号" else "" } ?: "未登录",
-            icon = Icons.Filled.Person,
-            onClick = { onNavigate(SettingsPage.Account) },
-        )
-        SettingsRow(
-            title = "外观",
-            subtitle = themeLabel(themeMode),
-            icon = Icons.Filled.Palette,
-            onClick = { onNavigate(SettingsPage.Appearance) },
-        )
-        SettingsRow(
-            title = "关于",
-            subtitle = "版本信息与许可",
-            icon = Icons.Filled.Info,
-            onClick = { onNavigate(SettingsPage.About) },
-        )
+        SettingsGroup {
+            ProfileHeader(
+                state = state,
+                account = current,
+                onQueryQuota = onQueryQuota,
+                onClaimOnce = onClaimOnce,
+                onOpenSocial = onOpenSocial,
+            )
+        }
+        SettingsGroup {
+            SettingsRow(
+                title = "账号与听时",
+                subtitle = if (current == null) "未登录" else "多账号、听时领取与登录方式",
+                icon = Icons.Filled.Person,
+                onClick = { onNavigate(SettingsPage.Account) },
+            )
+            GroupDivider()
+            SettingsRow(
+                title = "播放设置",
+                subtitle = "音质 · 跳过片头片尾",
+                icon = Icons.Filled.PlayCircleOutline,
+                onClick = { onNavigate(SettingsPage.Playback) },
+            )
+            GroupDivider()
+            SettingsRow(
+                title = "外观",
+                subtitle = themeLabel(themeMode),
+                icon = Icons.Filled.Palette,
+                onClick = { onNavigate(SettingsPage.Appearance) },
+            )
+            GroupDivider()
+            SettingsRow(
+                title = "备份与恢复",
+                subtitle = "导出订阅、书签与登录信息",
+                icon = Icons.Filled.SaveAlt,
+                onClick = { onNavigate(SettingsPage.Backup) },
+            )
+            GroupDivider()
+            SettingsRow(
+                title = "关于",
+                subtitle = "版本信息与许可",
+                icon = Icons.Filled.Info,
+                onClick = { onNavigate(SettingsPage.About) },
+            )
+        }
         Spacer(Modifier.height(bottomInset))
     }
+}
+
+@Composable
+private fun ProfileHeader(
+    state: UiState,
+    account: AccountSummary?,
+    onQueryQuota: (String) -> Unit,
+    onClaimOnce: (String) -> Unit,
+    onOpenSocial: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(58.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                val avatar = account?.avatarUrl
+                if (avatar != null) {
+                    coil.compose.AsyncImage(
+                        model = avatar,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else if (account != null) {
+                    Text(
+                        (account.nickname.take(1).ifEmpty { account.uid.take(1) }).ifEmpty { "我" },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.Person,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
+            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                Text(
+                    account?.nickname?.ifEmpty { "喜马拉雅账号" } ?: "未登录",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (account == null) {
+                        "登录后同步订阅、听更新与云历史"
+                    } else {
+                        listOfNotNull(
+                            account.mobile.takeIf { it.isNotEmpty() },
+                            "UID ${account.uid}",
+                            if (account.primary) "主账号" else null,
+                        ).joinToString(" · ")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(vertical = 12.dp),
+        ) {
+            Stat(
+                account?.following?.toString() ?: "—",
+                "关注",
+                Modifier.weight(1f).clickable { onOpenSocial("following") },
+            )
+            Stat(
+                account?.followers?.toString() ?: "—",
+                "粉丝",
+                Modifier.weight(1f).clickable { onOpenSocial("fans") },
+            )
+            Stat(
+                account?.subscriptionCount?.toString() ?: "${state.subscriptions.size}",
+                "订阅",
+                Modifier.weight(1f).clickable { onOpenSocial("subscriptions") },
+            )
+            Stat(
+                "${state.favorites.size}",
+                "收藏",
+                Modifier.weight(1f).clickable { onOpenSocial("favorites") },
+            )
+        }
+
+        if (account != null) {
+            val balance = account.balance
+            Text(
+                listOfNotNull(
+                    balance?.let { "可用听时 " + formatListeningTime(it.remainingSeconds) },
+                    balance?.let {
+                        "核验于 " + SimpleDateFormat("M-d HH:mm", Locale.CHINA)
+                            .format(Date(it.checkedAt.toEpochMilli()))
+                    } ?: if (account.quotaRejected) "听时核验被拒绝" else "尚未核验听时",
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            Row(
+                Modifier.padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { onQueryQuota(account.identity) },
+                    enabled = !state.accountBusy,
+                    shape = CircleShape,
+                ) { Text("查询听时") }
+                FilledTonalButton(
+                    onClick = { onClaimOnce(account.identity) },
+                    enabled = !state.accountBusy && !account.paused,
+                    shape = CircleShape,
+                ) { Text("领取一次") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupPage(
+    bottomInset: Dp,
+    onExport: (android.net.Uri, Boolean) -> Unit,
+    onImport: (android.net.Uri) -> Unit,
+) {
+    var includeCredentials by remember { mutableStateOf(true) }
+    var pendingExport by remember { mutableStateOf(false) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) onExport(uri, includeCredentials)
+        pendingExport = false
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) onImport(uri) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+    ) {
+        SettingsGroup {
+            Column(Modifier.padding(16.dp)) {
+                Text("导出备份", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "订阅、云历史、书签与外观设置打包为一个 JSON 文件。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("包含登录信息", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "备份文件将含账号令牌，请勿分享给他人",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    Switch(
+                        checked = includeCredentials,
+                        onCheckedChange = { includeCredentials = it },
+                    )
+                }
+                Button(
+                    onClick = {
+                        pendingExport = true
+                        exportLauncher.launch("xmpro-backup.json")
+                    },
+                    shape = CircleShape,
+                    modifier = Modifier.padding(top = 12.dp),
+                ) { Text("选择保存位置") }
+            }
+        }
+        SettingsGroup {
+            Column(Modifier.padding(16.dp)) {
+                Text("从备份恢复", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "会覆盖当前的订阅、书签与设置；若备份含登录信息，账号也会一并恢复。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                OutlinedButton(
+                    onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+                    shape = CircleShape,
+                    modifier = Modifier.padding(top = 12.dp),
+                ) { Text("选择备份文件") }
+            }
+        }
+        Spacer(Modifier.height(bottomInset))
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SeedSwatches(
+    selected: Int,
+    enabled: Boolean,
+    onSelect: (Int) -> Unit,
+) {
+    androidx.compose.foundation.layout.FlowRow(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        for ((_, color) in SeedPresets) {
+            val argb = color.toArgb()
+            val active = argb == selected
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(color)
+                    .then(
+                        if (active) {
+                            Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .alpha(if (enabled) 1f else 0.4f)
+                    .clickable(enabled = enabled) { onSelect(argb) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (active) {
+                    Box(
+                        Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun <T> ChoiceRow(
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for ((value, label) in options) {
+            val active = value == selected
+            Box(
+                Modifier
+                    .weight(1f)
+                    .clip(CircleShape)
+                    .background(
+                        if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    )
+                    .clickable { if (!active) onSelect(value) }
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (active) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+    ) {
+        Column { content() }
+    }
+}
+
+@Composable
+private fun GroupDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp),
+        thickness = 0.6.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+    )
+}
+
+@Composable
+private fun GroupTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 2.dp),
+    )
 }
 
 @Composable
@@ -250,27 +747,67 @@ private fun SettingsRow(
     icon: ImageVector,
     onClick: () -> Unit,
 ) {
-    ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
-        supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        leadingContent = {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        },
-        trailingContent = {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(19.dp),
             )
-        },
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-    )
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(horizontal = 12.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun InfoRow(title: String, subtitle: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
+        Text(title, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
 }
 
 @Composable
 private fun PageHeader(title: String, onBack: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 4.dp, top = 6.dp, end = 12.dp),
+        Modifier.fillMaxWidth().padding(start = 6.dp, top = 6.dp, end = 16.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
@@ -300,222 +837,149 @@ private fun AccountContent(
         LoginEntry(onAddCookie = onAddCookie, onAddSms = onAddSms)
         return
     }
-    ProfileCard(
-        account = current,
-        state = state,
-        busy = state.accountBusy,
-        onQueryQuota = onQueryQuota,
-        onClaim = onClaimOnce,
-        onResume = onResumeRewards,
-    )
     if (state.accounts.size > 1) {
-        SectionHeader("其他账号")
+        SettingsSectionLabel("其他账号")
         for (account in state.accounts.filter { it.identity != current.identity }) {
-            AccountCard(
-                account = account,
-                busy = state.accountBusy,
-                onSetPrimary = onSetPrimary,
-                onRemove = onRemoveAccount,
-                onQueryQuota = onQueryQuota,
-                onClaim = onClaimOnce,
-                onResume = onResumeRewards,
-            )
+            SettingsGroup {
+                AccountCard(
+                    account = account,
+                    busy = state.accountBusy,
+                    onSetPrimary = onSetPrimary,
+                    onRemove = onRemoveAccount,
+                    onQueryQuota = onQueryQuota,
+                    onClaim = onClaimOnce,
+                    onResume = onResumeRewards,
+                )
+            }
         }
     }
-    SectionHeader("账号管理")
-    ActionRow(
-        title = "修改账号名",
-        subtitle = "同步失败时可自定义显示名称",
-        onClick = { onRename(current.identity) },
-    )
-    ActionRow(
-        title = "同步账号资料",
-        subtitle = "从喜马拉雅拉取昵称与头像",
-        onClick = onSyncProfile,
-    )
-    ActionRow(
-        title = "添加 Cookie 账号",
-        subtitle = "粘贴极速版 Cookie 或登录信息 JSON",
-        onClick = onAddCookie,
-    )
-    ActionRow(
-        title = "短信登录新账号",
-        subtitle = "手机号 + 安全验证",
-        onClick = onAddSms,
-    )
-    ActionRow(
-        title = "退出当前账号",
-        subtitle = "仅清除本机登录信息，听时记录保留",
-        onClick = onSignOut,
-    )
-    SectionHeader("听时")
-    ListItem(
-        headlineContent = { Text("自动领取听时") },
-        supportingContent = {
-            Text("不足 2 小时补充至 4 小时，对所有账号生效；领取失败会自动暂停该账号")
-        },
-        trailingContent = {
+    SettingsSectionLabel("账号管理")
+    SettingsGroup {
+        ActionRow(
+            title = "修改账号名",
+            subtitle = "同步失败时可自定义显示名称",
+            onClick = { onRename(current.identity) },
+        )
+        GroupDivider()
+        ActionRow(
+            title = "同步账号资料",
+            subtitle = "从喜马拉雅拉取昵称、头像与关注粉丝数",
+            onClick = onSyncProfile,
+        )
+        GroupDivider()
+        ActionRow(
+            title = "添加 Cookie 账号",
+            subtitle = "粘贴极速版 Cookie 或登录信息 JSON",
+            onClick = onAddCookie,
+        )
+        GroupDivider()
+        ActionRow(
+            title = "短信登录新账号",
+            subtitle = "手机号 + 安全验证",
+            onClick = onAddSms,
+        )
+        GroupDivider()
+        ActionRow(
+            title = "退出当前账号",
+            subtitle = "仅清除本机登录信息，听时记录保留",
+            danger = true,
+            onClick = onSignOut,
+        )
+    }
+    SettingsSectionLabel("听时")
+    SettingsGroup {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("自动领取听时", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "不足 2 小时补充至 4 小时，对所有账号生效；领取失败会自动暂停该账号",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
             Switch(
                 checked = state.autoClaim,
                 enabled = !state.accountBusy,
                 onCheckedChange = onAutoClaim,
             )
-        },
-        modifier = Modifier.padding(horizontal = 4.dp),
-    )
-    if (current.paused) {
-        ListItem(
-            headlineContent = { Text("该账号的自动领取已暂停") },
-            supportingContent = { Text("请先在官方 App 核对上一次领取结果，再恢复自动领取") },
-            trailingContent = {
+        }
+        if (current.paused) {
+            GroupDivider()
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "该账号的自动领取已暂停",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        "请先在官方 App 核对上一次领取结果，再恢复自动领取",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
                 TextButton(
                     onClick = { onResumeRewards(current.identity) },
                     enabled = !state.accountBusy,
                 ) { Text("恢复") }
-            },
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun LoginEntry(onAddCookie: () -> Unit, onAddSms: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Card(
-            Modifier.fillMaxWidth(),
-            colors = androidx.compose.material3.CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Text("还没有登录账号", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "登录后可同步订阅、听更新与云历史，并查看可用听时",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onAddCookie, modifier = Modifier.weight(1f)) { Text("Cookie 登录") }
-                    OutlinedButton(onClick = onAddSms, modifier = Modifier.weight(1f)) { Text("短信登录") }
-                }
-                Text(
-                    "主账号用于默认请求",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
             }
         }
     }
 }
 
 @Composable
-private fun ProfileCard(
-    account: AccountSummary,
-    state: UiState,
-    busy: Boolean,
-    onQueryQuota: (String) -> Unit,
-    onClaim: (String) -> Unit,
-    onResume: (String) -> Unit,
-) {
-    val balance = account.balance
-    Card(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val avatar = account.avatarUrl
-                    if (avatar != null) {
-                        coil.compose.AsyncImage(
-                            model = avatar,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        )
-                    } else {
-                        Text(
-                            (account.nickname.take(1).ifEmpty { account.uid.take(1) }).ifEmpty { "我" },
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
-                }
-                Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                    Text(
-                        account.nickname.ifEmpty { "喜马拉雅账号" },
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        listOfNotNull(
-                            account.mobile.takeIf { it.isNotEmpty() },
-                            "UID ${account.uid}",
-                            if (account.primary) "主账号" else null,
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-            }
+private fun SettingsSectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 2.dp),
+    )
+}
 
+@Composable
+private fun LoginEntry(onAddCookie: () -> Unit, onAddSms: () -> Unit) {
+    Spacer(Modifier.height(6.dp))
+    SettingsGroup {
+        Column(Modifier.padding(20.dp)) {
+            Text("还没有登录账号", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "登录后可同步订阅、听更新与云历史，并查看可用听时",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
             Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(vertical = 12.dp),
+                Modifier.padding(top = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Stat(
-                    value = if (balance == null) "—" else formatListeningTime(balance.remainingSeconds),
-                    label = "可用听时",
-                    modifier = Modifier.weight(1.4f),
-                )
-                Stat("${state.subscriptions.size}", "订阅", Modifier.weight(1f))
-                Stat("${state.favorites.size}", "收藏", Modifier.weight(1f))
-            }
-
-            val meta = when {
-                balance != null ->
-                    "核验于 " + SimpleDateFormat("M-d HH:mm", Locale.CHINA)
-                        .format(Date(balance.checkedAt.toEpochMilli()))
-
-                account.quotaRejected -> "听时核验被拒绝，可重新查询"
-                else -> "尚未核验听时"
+                Button(
+                    onClick = onAddCookie,
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Cookie 登录") }
+                FilledTonalButton(
+                    onClick = onAddSms,
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f),
+                ) { Text("短信登录") }
             }
             Text(
-                meta,
+                "主账号用于默认请求",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = 10.dp),
             )
-
-            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { onQueryQuota(account.identity) }, enabled = !busy) {
-                    Text("查询听时")
-                }
-                OutlinedButton(onClick = { onClaim(account.identity) }, enabled = !busy && !account.paused) {
-                    Text("领取一次")
-                }
-                if (account.paused) {
-                    TextButton(onClick = { onResume(account.identity) }, enabled = !busy) {
-                        Text("恢复领取")
-                    }
-                }
-            }
         }
     }
 }
@@ -540,36 +1004,44 @@ private fun Stat(value: String, label: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 20.dp, top = 24.dp, bottom = 4.dp),
-    )
-}
-
-@Composable
 private fun ActionRow(
     title: String,
     subtitle: String,
+    danger: Boolean = false,
     onClick: () -> Unit,
 ) {
-    ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        trailingContent = {
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        modifier = Modifier
+    Row(
+        Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp),
-    )
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (danger) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
@@ -582,62 +1054,238 @@ private fun AccountCard(
     onClaim: (String) -> Unit,
     onResume: (String) -> Unit,
 ) {
-    OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Column(Modifier.padding(12.dp)) {
-            Row {
-                Text(
-                    "账号 ${account.uid.ifEmpty { account.identity.take(8) }}",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f),
-                )
-                if (account.primary) {
+    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                account.nickname.ifEmpty { "账号 ${account.uid.ifEmpty { account.identity.take(8) }}" },
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (account.primary) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
                     Text(
                         "主账号",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     )
                 }
             }
+        }
+        Text(
+            "设备 ${account.deviceHint} · " +
+                (account.balance?.let { formatListeningTime(it.remainingSeconds) } ?: "听时未核验"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 3.dp),
+        )
+        if (account.paused) {
             Text(
-                "设备 ${account.deviceHint} · " +
-                    (account.balance?.let { formatListeningTime(it.remainingSeconds) } ?: "听时未核验"),
+                "领取已暂停，请先在官方 App 核对上一次结果。",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (!account.primary) {
+                TextButton(onClick = { onSetPrimary(account.identity) }, enabled = !busy) {
+                    Text("设为主账号")
+                }
+            }
+            TextButton(onClick = { onQueryQuota(account.identity) }, enabled = !busy) {
+                Text("查询听时")
+            }
+            TextButton(onClick = { onClaim(account.identity) }, enabled = !busy && !account.paused) {
+                Text("领取一次")
+            }
+            if (account.paused) {
+                TextButton(onClick = { onResume(account.identity) }, enabled = !busy) {
+                    Text("恢复领取")
+                }
+            }
+            TextButton(onClick = { onRemove(account.identity) }, enabled = !busy) {
+                Text("移除")
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun SocialSheet(
+    kind: String,
+    state: UiState,
+    onDismiss: () -> Unit,
+    onOpenUser: (String) -> Unit,
+) {
+    val title = when (kind) {
+        "following" -> "\u5173\u6ce8"
+        "fans" -> "\u7c89\u4e1d"
+        "subscriptions" -> "\u8ba2\u9605"
+        else -> "\u6536\u85cf"
+    }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                when (kind) {
+                    "subscriptions" -> "\u5171 " + state.subscriptions.size + " \u4e2a"
+                    "favorites" -> "\u5171 " + state.favorites.size + " \u6761"
+                    else -> "\u5171 " + state.socialUsers.size + " \u4f4d"
+                },
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (account.paused) {
-                Text(
-                    "领取已暂停，请先在官方 App 核对上一次结果。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                if (!account.primary) {
-                    TextButton(onClick = { onSetPrimary(account.identity) }, enabled = !busy) {
-                        Text("设为主账号")
+        }
+        if (state.socialLoading) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp)
+                    .height(2.dp)
+                    .clip(CircleShape),
+            )
+        }
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.padding(bottom = 24.dp)) {
+            when (kind) {
+                "following", "fans" -> {
+                    items(state.socialUsers, key = { it.uid }) { user ->
+                        SocialRow(
+                            title = user.nickname.ifEmpty { "\u7528\u6237 " + user.uid },
+                            subtitle = formatCount(user.followers) + " \u7c89\u4e1d \u00b7 " +
+                                user.albums + " \u4e13\u8f91",
+                            avatar = user.avatarUrl,
+                            onClick = {
+                                onDismiss()
+                                onOpenUser(user.uid)
+                            },
+                        )
+                    }
+                    if (!state.socialLoading && state.socialUsers.isEmpty()) {
+                        item { SheetEmpty("\u6682\u65e0" + title) }
                     }
                 }
-                TextButton(onClick = { onQueryQuota(account.identity) }, enabled = !busy) {
-                    Text("查询听时")
-                }
-                TextButton(onClick = { onClaim(account.identity) }, enabled = !busy && !account.paused) {
-                    Text("领取一次")
-                }
-                if (account.paused) {
-                    TextButton(onClick = { onResume(account.identity) }, enabled = !busy) {
-                        Text("恢复领取")
+
+                "subscriptions" -> {
+                    items(state.subscriptions, key = { it.album.id }) { item ->
+                        SocialRow(
+                            title = item.album.title,
+                            subtitle = listOfNotNull(
+                                item.album.artist.takeIf { it.isNotEmpty() },
+                                item.album.total.toString() + " \u96c6",
+                            ).joinToString(" \u00b7 "),
+                            avatar = item.album.coverUrl,
+                        )
                     }
+                    if (state.subscriptions.isEmpty()) item { SheetEmpty("\u6682\u65e0\u8ba2\u9605") }
                 }
-                TextButton(onClick = { onRemove(account.identity) }, enabled = !busy) {
-                    Text("移除")
+
+                else -> {
+                    items(state.favorites, key = { it.id }) { track ->
+                        SocialRow(
+                            title = track.title.ifEmpty { track.number },
+                            subtitle = track.album.ifEmpty { track.artist },
+                            avatar = track.coverUrl,
+                        )
+                    }
+                    if (state.favorites.isEmpty()) item { SheetEmpty("\u6682\u65e0\u6536\u85cf") }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SocialRow(
+    title: String,
+    subtitle: String,
+    avatar: String?,
+    onClick: (() -> Unit)? = null,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Avatar(url = avatar, fallback = title, size = 44)
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetEmpty(text: String) {
+    Box(Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
+        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun Avatar(url: String?, fallback: String, size: Int) {
+    Box(
+        Modifier
+            .size(size.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (url != null) {
+            coil.compose.AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text(
+                fallback.take(1).ifEmpty { "?" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun formatCount(value: Int): String = when {
+    value >= 100_000_000 -> "%.1f\u4ebf".format(value / 100_000_000.0)
+    value >= 10_000 -> "%.1f\u4e07".format(value / 10_000.0)
+    else -> value.toString()
 }
 
 @Composable
@@ -656,6 +1304,7 @@ private fun RenameDialog(
                 onValueChange = { text = it.take(24) },
                 label = { Text("显示名称") },
                 singleLine = true,
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -679,6 +1328,7 @@ private fun CookieDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
                 label = { Text("Cookie 或登录信息 JSON") },
                 minLines = 4,
                 maxLines = 8,
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -749,12 +1399,14 @@ private fun SmsLoginDialog(
                     label = { Text("手机号") },
                     singleLine = true,
                     enabled = !busy && challenge == null,
+                    shape = RoundedCornerShape(14.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 )
                 OutlinedButton(
                     onClick = { showCaptcha = true },
                     enabled = !busy && challenge == null && phone.length >= 6,
+                    shape = CircleShape,
                     modifier = Modifier.padding(top = 8.dp),
                 ) {
                     Text(if (challenge == null) "安全验证并发送短信" else "短信已发送")
@@ -766,6 +1418,7 @@ private fun SmsLoginDialog(
                         label = { Text("短信验证码") },
                         singleLine = true,
                         enabled = !busy,
+                        shape = RoundedCornerShape(14.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = {
                             if (!busy && code.length >= 4) verify()
@@ -831,16 +1484,6 @@ private fun SmsLoginDialog(
     LaunchedEffect(signedIn) {
         if (signedIn) onSignedIn()
     }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
-    )
 }
 
 private fun themeLabel(mode: String): String = when (mode) {

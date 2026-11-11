@@ -84,7 +84,7 @@ object XmlyCrypto {
         val uuid = ByteArray(16).also(random::nextBytes)
         uuid[6] = ((uuid[6].toInt() and 0x0F) or 0x40).toByte()
         uuid[8] = ((uuid[8].toInt() and 0x3F) or 0x80).toByte()
-        val seconds = nowSeconds ?: (System.currentTimeMillis() / 1000)
+        val seconds = nowSeconds ?: (ServerClock.now() / 1000)
         val payload = ByteArray(4 + 16 + 16)
         payload[0] = ((seconds shr 24) and 0xFF).toByte()
         payload[1] = ((seconds shr 16) and 0xFF).toByte()

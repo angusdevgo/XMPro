@@ -21,7 +21,7 @@ import teikengstudio.xmpro.model.XmlyException
  */
 class XmlyLogin(
     private val client: OkHttpClient = defaultClient(),
-    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val clock: () -> Long = { ServerClock.now() },
     /**
      * Device id used for the login cookie. Passing a per-install id keeps the
      * server's device binding (and therefore the listening quota) stable across

@@ -36,6 +36,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             var oledBlack by remember { mutableStateOf(container.oledBlack()) }
             var themeMode by remember { mutableStateOf(container.themeMode()) }
+            var dynamicColor by remember { mutableStateOf(container.dynamicColor()) }
+            var seedColor by remember { mutableStateOf(androidx.compose.ui.graphics.Color(container.seedColor())) }
             val dark = when (themeMode) {
                 "light" -> false
                 "dark" -> true
@@ -47,13 +49,22 @@ class MainActivity : ComponentActivity() {
                     isAppearanceLightNavigationBars = !dark
                 }
             }
-            XmproTheme(darkTheme = dark, oledBlack = oledBlack) {
+            XmproTheme(
+                darkTheme = dark,
+                oledBlack = oledBlack,
+                dynamicColor = dynamicColor,
+                seed = seedColor,
+            ) {
                 ShellScreen(
                     container = container,
                     oledBlack = oledBlack,
                     onOledBlackChange = {
                         oledBlack = it
                         container.setOledBlack(it)
+                    },
+                    onAppearanceChange = { useDynamic, seed ->
+                        dynamicColor = useDynamic
+                        seedColor = androidx.compose.ui.graphics.Color(seed)
                     },
                 )
             }

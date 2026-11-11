@@ -225,6 +225,7 @@ class XmlyHttp(
             }
             val stream = response.body?.byteStream()
             val text = stream?.let { readBounded(it, responseLimit) } ?: ""
+            ServerClock.observeDateHeader(response.header("Date"))
             return Outcome(response.code, text, url.toString(), response.header("Retry-After"))
         }
     }
@@ -278,6 +279,7 @@ class XmlyHttp(
         } catch (_: Exception) {
             throw XmlyException("invalid_json", "接口返回无效 JSON")
         }
+        ServerClock.observePayload(payload)
         val expected = if (origin == searchOrigin) "200" else "0"
         val code = payload.opt("ret")?.toString() ?: "0"
         if (code != expected) {
@@ -292,6 +294,15 @@ class XmlyHttp(
                 throw XmlyException(
                     "permission_denied",
                     "未获得本次请求的完整权限，请检查账号、听时和版权限制",
+                    definitive = true,
+                )
+            }
+            if (code == "-400") {
+                // Parameter/signature validation failed; the usual cause is a
+                // clock that is out of sync with the server's.
+                throw XmlyException(
+                    "bad_timestamp",
+                    "请求校验失败（设备时间与服务端偏差过大），请校准时间后重试",
                     definitive = true,
                 )
             }

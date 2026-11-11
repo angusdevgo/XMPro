@@ -14,7 +14,7 @@ import teikengstudio.xmpro.model.XmlyException
  */
 class XmlyRewards(
     private val client: XmlyClient,
-    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val clock: () -> Long = { ServerClock.now() },
 ) {
     @Volatile
     var lastError: String = ""

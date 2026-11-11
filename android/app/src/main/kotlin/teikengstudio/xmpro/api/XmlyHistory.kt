@@ -19,7 +19,7 @@ import teikengstudio.xmpro.model.xmlyIdentifier
  */
 class XmlyHistory(
     private val client: XmlyClient,
-    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val clock: () -> Long = { ServerClock.now() },
 ) {
     private fun invalid(message: String) = XmlyException("invalid_history", message)
 

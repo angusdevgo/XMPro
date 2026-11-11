@@ -41,6 +41,7 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -65,6 +66,8 @@ fun FloatingBottomBar(
     /** Capsule backplate; pass null for a fully transparent bar. */
     containerColor: Color? = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
     indicatorColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
+    /** Gap above the pill; tightened when the mini player sits right above it. */
+    topPadding: Dp = 12.dp,
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
@@ -87,7 +90,7 @@ fun FloatingBottomBar(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(start = 12.dp, end = 12.dp, top = topPadding, bottom = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Box(

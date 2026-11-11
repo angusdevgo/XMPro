@@ -9,6 +9,8 @@ import teikengstudio.xmpro.model.HomeChannel
 import teikengstudio.xmpro.model.HomeContent
 import teikengstudio.xmpro.model.HomeSection
 import teikengstudio.xmpro.model.HomeTab
+import teikengstudio.xmpro.model.SocialCounts
+import teikengstudio.xmpro.model.SocialUser
 import teikengstudio.xmpro.model.SubscriptionItem
 import teikengstudio.xmpro.model.SubscriptionPage
 import teikengstudio.xmpro.model.Track
@@ -320,6 +322,7 @@ class XmlyExperience(private val client: XmlyClient) {
         requireAccount()
         val uid = client.context()["uid"] ?: throw invalid
         val payload = profilePayload(uid)
+        val counts = runCatching { socialCounts(uid) }.getOrNull()
         val nickname = findString(payload, setOf("nickname", "userName", "name", "nickName")) ?: ""
         val avatar = findString(payload, setOf("avatar", "avatarUrl", "logoPic", "smallLogo", "cover"))
         val mobile = findString(payload, setOf("mobile", "phone", "mobilePhone")) ?: ""
@@ -329,8 +332,157 @@ class XmlyExperience(private val client: XmlyClient) {
         return teikengstudio.xmpro.model.UserProfile(
             uid = uid,
             nickname = nickname,
-            avatarUrl = avatar?.takeIf { it.startsWith("http") },
+            avatarUrl = teikengstudio.xmpro.model.cdnUrl(avatar),
             intro = findString(payload, setOf("personalSignature", "intro", "description")) ?: "",
+            followers = counts?.followers,
+            following = counts?.following,
+            subscriptions = counts?.subscriptions,
+        )
+    }
+
+    /**
+     * Public homepage of an anchor: counters, intro and the first page of the
+     * albums they published. Works without a session, so it is also used for
+     * anchors opened from the following / fans lists.
+     */
+    fun userPage(uid: String): teikengstudio.xmpro.model.UserPage {
+        val payload = client.request(
+            "GET",
+            XmlyHttp.SEARCH_ORIGIN,
+            "/revision/user",
+            query = mapOf("uid" to uid),
+        )
+        val data = payload.optJSONObject("data") ?: throw invalid
+        val albums = ArrayList<Album>()
+        val pub = data.optJSONObject("pubPageInfo")
+        val list = pub?.optJSONArray("pubInfoList")
+        var nickname = ""
+        var avatar: String? = null
+        var intro = ""
+        if (list != null) {
+            for (index in 0 until list.length()) {
+                val item = list.optJSONObject(index) ?: continue
+                val id = item.optInt("id", 0)
+                if (id <= 0) continue
+                if (nickname.isEmpty()) nickname = item.optString("anchorNickName")
+                if (avatar == null) avatar = teikengstudio.xmpro.model.cdnUrl(item.optString("coverPath"))
+                albums.add(
+                    Album(
+                        rawId = id.toString(),
+                        title = item.optString("title"),
+                        artist = item.optString("anchorNickName"),
+                        coverUrl = teikengstudio.xmpro.model.cdnUrl(item.optString("coverPath")),
+                        total = maxOf(item.optInt("trackCount", 0), 0),
+                        intro = item.optString("subTitle"),
+                        raw = teikengstudio.xmpro.model.publicRaw(
+                            mapOf(
+                                "id" to id,
+                                "title" to item.optString("title"),
+                                "albumTitle" to item.optString("title"),
+                                "intro" to item.optString("subTitle"),
+                                "total" to item.optInt("trackCount", 0),
+                                "isFinished" to item.optBoolean("isFinished"),
+                                "isPaid" to item.optBoolean("isPaid"),
+                            ),
+                        ),
+                    ),
+                )
+            }
+        }
+        if (nickname.isEmpty() || avatar == null || intro.isEmpty()) {
+            // The list is empty for anchors without albums; fall back to the
+            // followed account's own profile for those fields.
+            val self = runCatching { profileOf(uid) }.getOrNull()
+            if (self != null) {
+                if (nickname.isEmpty()) nickname = self.nickname
+                if (avatar == null) avatar = self.avatarUrl
+                if (intro.isEmpty()) intro = self.intro
+            }
+        }
+        return teikengstudio.xmpro.model.UserPage(
+            uid = uid,
+            nickname = nickname,
+            avatarUrl = avatar,
+            intro = intro,
+            followers = data.optJSONObject("fansPageInfo")?.optInt("totalCount", 0) ?: 0,
+            following = data.optJSONObject("followingPageInfo")?.optInt("totalCount", 0) ?: 0,
+            albums = albums,
+            totalAlbums = pub?.optInt("totalCount", 0) ?: 0,
+        )
+    }
+
+    /** Minimal profile for anyone (no session needed). */
+    private fun profileOf(uid: String): teikengstudio.xmpro.model.UserProfile {
+        val payload = client.request(
+            "GET",
+            XmlyHttp.SEARCH_ORIGIN,
+            "/revision/user",
+            query = mapOf("uid" to uid, "includeProfile" to "1"),
+        )
+        val data = payload.optJSONObject("data") ?: throw invalid
+        return teikengstudio.xmpro.model.UserProfile(
+            uid = uid,
+            nickname = findString(data, setOf("anchorNickName", "nickname", "userName")) ?: "",
+            avatarUrl = teikengstudio.xmpro.model.cdnUrl(
+                findString(data, setOf("coverPath", "avatar", "cover")),
+            ),
+            intro = findString(data, setOf("description", "intro")) ?: "",
+        )
+    }
+
+    /** People this account follows (first page only). */
+    fun following(uid: String): List<SocialUser> = socialList(uid, "followingPageInfo", "followInfoList")
+
+    /** People following this account (first page only). */
+    fun fans(uid: String): List<SocialUser> = socialList(uid, "fansPageInfo", "fansInfoList")
+
+    private fun socialList(uid: String, pageKey: String, listKey: String): List<SocialUser> {
+        val payload = client.request(
+            "GET",
+            XmlyHttp.SEARCH_ORIGIN,
+            "/revision/user",
+            query = mapOf("uid" to uid),
+        )
+        val list = payload.optJSONObject("data")
+            ?.optJSONObject(pageKey)
+            ?.optJSONArray(listKey) ?: return emptyList()
+        val result = ArrayList<SocialUser>(list.length())
+        for (index in 0 until list.length()) {
+            val item = list.optJSONObject(index) ?: continue
+            val id = item.optInt("uid", 0)
+            if (id <= 0) continue
+            result.add(
+                SocialUser(
+                    uid = id.toString(),
+                    nickname = item.optString("anchorNickName").ifEmpty { item.optString("nickName") },
+                    avatarUrl = teikengstudio.xmpro.model.cdnUrl(item.optString("coverPath")),
+                    followers = item.optInt("followerCount", 0),
+                    albums = item.optInt("albumCount", 0),
+                    intro = item.optString("description"),
+                ),
+            )
+        }
+        return result
+    }
+
+    /**
+     * Public counters for any uid: following / fans / subscriptions.
+     * `revision/user` needs no session, so this also works for other people.
+     */
+    fun socialCounts(uid: String): SocialCounts {
+        val payload = client.request(
+            "GET",
+            XmlyHttp.SEARCH_ORIGIN,
+            "/revision/user",
+            query = mapOf("uid" to uid),
+        )
+        val data = payload.optJSONObject("data") ?: throw invalid
+        return SocialCounts(
+            following = data.optJSONObject("followingPageInfo")?.optInt("totalCount", 0) ?: 0,
+            followers = data.optJSONObject("fansPageInfo")?.optInt("totalCount", 0) ?: 0,
+            subscriptions = data.optJSONObject("subscriptionPageInfo")?.optInt("totalCount", 0) ?: 0,
+            albums = data.optJSONObject("pubPageInfo")?.optInt("totalCount", 0) ?: 0,
+            tracks = data.optJSONObject("trackPageInfo")?.optInt("totalCount", 0) ?: 0,
         )
     }
 
@@ -367,6 +519,38 @@ class XmlyExperience(private val client: XmlyClient) {
             }
         }
         throw last ?: XmlyException("profile_unavailable", "账号资料不可用", definitive = true)
+    }
+
+    /** Breadth-first search for the first numeric counter under [keys]. */
+    private fun findCount(root: JSONObject, keys: Set<String>): Int? {
+        val queue = ArrayDeque<Any>()
+        queue.add(root)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < 3000) {
+            visited++
+            when (val node = queue.removeFirst()) {
+                is JSONObject -> {
+                    for (key in node.keys()) {
+                        if (key in keys) {
+                            val value = node.optInt(key, -1)
+                            if (value >= 0) return value
+                        }
+                    }
+                    for (key in node.keys()) {
+                        when (val child = node.opt(key)) {
+                            is JSONObject, is JSONArray -> queue.add(child)
+                        }
+                    }
+                }
+
+                is JSONArray -> for (index in 0 until node.length()) {
+                    when (val child = node.opt(index)) {
+                        is JSONObject, is JSONArray -> queue.add(child)
+                    }
+                }
+            }
+        }
+        return null
     }
 
     /** Breadth-first search for the first non-blank string under [keys]. */
