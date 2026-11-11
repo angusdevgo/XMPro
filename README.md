@@ -60,9 +60,10 @@ export ANDROID_KEY_PASSWORD=...
 
 推送到 `v*` 标签时，CI 会用仓库 secrets 签名、校验签名与版本号，并把产物发布到 Releases。
 
-## 🤝 Acknowledgements & License
+## 🤝 致谢与开源许可
 
--开源协议：**AGPL-3.0-or-later** 
--特别致谢开源项目： [**XMPlus**](https://github.com/teikengstudio/XMPlus) 
--特别致谢开源项目：[**sld272/Ximalaya-Downloader-Next**](https://github.com/sld272/Ximalaya-Downloader-Next)
--本项目与喜马拉雅官方无关，仅供个人学习与自用，请使用自己的账号并遵守服务条款。
+- 开源协议：**AGPL-3.0-or-later** 
+- 特别致谢开源项目： [**teikengstudio/XMPlus**](https://github.com/teikengstudio/XMPlus) 
+- 特别致谢开源项目：[**sld272/Ximalaya-Downloader-Next**](https://github.com/sld272/Ximalaya-Downloader-Next)
+- 感谢 [**LINUX DO**](https://linux.do/) 社区提供的高质量技术交流氛围。
+- 本项目与喜马拉雅官方无关，仅供个人学习与自用，请使用自己的账号并遵守服务条款。
