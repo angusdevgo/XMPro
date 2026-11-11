@@ -16,7 +16,7 @@
 XMPro 是 [XMPlus](https://github.com/teikengstudio/XMPlus) 的**修改版（二改）**。
 
 上游 XMPlus 用 Flutter 实现；本项目把客户端整体重写为纯 Kotlin + Jetpack Compose，
-界面按自己的风格重做，并移除了下载功能与桌面端。
+界面风格重做，移除下载功能与桌面端。
 
 | | 上游 XMPlus | 本项目 XMPro |
 | :--- | :--- | :--- |
