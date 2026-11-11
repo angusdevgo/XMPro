@@ -1,7 +1,7 @@
 <div align="center">
   <img width="140" height="140" src="assets/branding/xmpro.png" alt="XMPro">
   <h1>XMPro</h1>
-  <p>一个安静好用的喜马拉雅收听客户端 · Kotlin + Jetpack Compose</p>
+  <p>喜马拉雅第三方 Android 收听客户端 · Kotlin + Jetpack Compose</p>
 
   [![Android CI](https://github.com/angusdevgo/XMPro/actions/workflows/android.yml/badge.svg)](https://github.com/angusdevgo/XMPro/actions/workflows/android.yml)
   [![GitHub release](https://img.shields.io/github/release/angusdevgo/XMPro)](https://github.com/angusdevgo/XMPro/releases/latest)
@@ -11,65 +11,93 @@
 
 <br/>
 
-## 简介
+## 项目说明
 
-XMPro 是基于**喜马拉雅极速版**内容接口的第三方 Android 收听客户端，使用 Kotlin 与 Jetpack Compose 从零实现，界面与交互贴合 Material 3 规范。
+XMPro 是基于喜马拉雅极速版内容接口的第三方 Android 客户端，使用 Kotlin 与 Jetpack Compose 实现，界面遵循 Material 3 设计规范。
+
+项目仅面向 Android 平台，仅构建 `arm64-v8a` 单一 ABI。
 
 ## 功能
 
-### 收听
+**播放**
 
-- **长篇选集区间** —— 上千集不用一集集翻，按每 100 集分段直接跳；播放队列也只保留这一段，前后切换不会跑出去。
-- **待播队列** —— 在播放页随时查看和切换队列，同样支持分段，长专辑可以只挑其中一段来播。
-- **后台播放** —— Media3 承载播放，通知栏、锁屏、蓝牙耳机皆可控制，切后台不断播。
-- **跳过头尾** —— 两种模式：智能模式识别开头空白与结尾静音自动跳过；手动模式按全集比例设置裁剪点，几分钟的段子和几十分钟的长篇都适用。
-- **倍速与定时** —— 播放倍速循环切换，定时关闭到点即停。
-- **音质选择** —— 自动优先高音质，也可手动锁定档位。
+| 能力 | 说明 |
+| :--- | :--- |
+| 选集区间 | 长篇专辑按每 100 集分段，定位到任意区段；播放队列限定在该段内，切集不会越界 |
+| 待播队列 | 播放页可展开队列并切换曲目，队列同样支持分段筛选 |
+| 后台播放 | 由 Media3 `MediaSessionService` 承载，支持通知栏、锁屏与蓝牙设备控制 |
+| 跳过头尾 | 智能模式基于音频静音检测跳过首尾空白；手动模式按全集比例设置裁剪点，适配不同时长节目 |
+| 倍速与定时 | 播放倍速循环切换，定时关闭到点暂停 |
+| 音质 | 默认自动选择最高可用档位，也可手动锁定 |
 
-### 书单
+**内容**
 
-- **听更新 / 订阅 / 历史 / 收藏** 各自独立，互不干扰。
-- **书签** —— 在任意位置打点，回头直接接着听。
-- **主播主页** —— 从关注或粉丝列表进入，查看对方全部专辑。
-- **播放进度云同步** —— 本地与云端进度取较新者，换设备接着听。
+| 能力 | 说明 |
+| :--- | :--- |
+| 书单分类 | 听更新、订阅、历史、收藏四类列表独立维护 |
+| 书签 | 在任意播放位置记录，可从记录处继续播放 |
+| 主播主页 | 由关注或粉丝列表进入，展示该主播的专辑列表 |
+| 进度同步 | 播放进度定期写入云端历史，本地与云端取较新者作为续播位置 |
 
-### 听时
+**听时**
 
-- **本机听时** —— 显示当前设备可用听时，按设备计算，换账号不改变。
-- **福利任务** —— 查看各档时长与最近到账时间，也可展开看接口返回的完整字段。
-- **自动领取** —— 余额偏低时自动补充；领取失败会显示官方给出的原因。
+| 能力 | 说明 |
+| :--- | :--- |
+| 余额查询 | 显示当前设备可用听时；该额度按设备计算，不随账号变化 |
+| 福利任务 | 展示各档位时长与最近到账时间，可查看接口返回的完整字段 |
+| 自动领取 | 余额低于阈值时自动补充；失败时展示服务端返回的原因 |
 
-### 账号与外观
+**账号与外观**
 
-- **多账号** —— 账号卡或账号列表点一下即切换，无需重新登录。
-- **凭据迁移** —— 复制已登录账号的 Cookie，粘贴到另一台设备即可登录。
-- **频道自定义** —— 首页频道可排序、隐藏、恢复默认。
-- **外观** —— Android 12+ 动态取色，另有 7 套预设主题；深色模式与 OLED 纯黑可选。
-- **备份恢复** —— 导出配置与书单，换机导入即恢复，可选择是否包含登录信息。
+| 能力 | 说明 |
+| :--- | :--- |
+| 多账号 | 账号卡或列表点击即切换，无需重新登录；非当前账号仅提供切换入口 |
+| 凭据迁移 | 导出已登录账号的 Cookie，可在其他设备导入登录 |
+| 频道管理 | 首页频道支持排序、隐藏与恢复默认 |
+| 外观 | Android 12+ 动态取色，内置 7 套预设主题；支持深色与 OLED 纯黑 |
+| 备份恢复 | 导出配置与书单，导入即恢复，可选择是否包含登录信息 |
 
-## 下载
+## 技术栈
 
-从 [Releases](https://github.com/angusdevgo/XMPro/releases) 获取：
+| 项目 | 版本 / 说明 |
+| :--- | :--- |
+| 语言 | Kotlin 2.0.20 |
+| UI | Jetpack Compose，Material 3 |
+| 播放 | AndroidX Media3（ExoPlayer + MediaSessionService） |
+| 构建 | Gradle 8.9、AGP 8.7.3 |
+| SDK | `compileSdk` 35、`minSdk` 24（Android 7.0） |
+| ABI | `arm64-v8a` |
+
+源码组织：
+
+```
+api/       接口封装、签名与协议解析
+data/      持久化、多账号与听时账本
+model/     数据模型
+player/    播放控制与音频处理
+ui/        Compose 界面与视图模型
+updater/   版本检查、下载与校验
+```
+
+## 安装
+
+从 [Releases](https://github.com/angusdevgo/XMPro/releases) 下载：
 
 ```
 XMPro-<版本>-android-arm64-v8a.apk
 SHA256SUMS
 ```
 
-仅构建 `arm64-v8a`，安装前请确认设备架构；要求 Android 7.0（API 24）及以上。
+设备需为 `arm64-v8a` 架构、Android 7.0 及以上。应用内检查更新会下载安装包并与 `SHA256SUMS` 比对，校验通过后交由系统安装器处理。
 
-应用内检查更新会直接下载并用 `SHA256SUMS` 校验后交给系统安装，不跳浏览器。
-
-## 编译
-
-工具链：JDK 17、Gradle 8.9、AGP 8.7.3、Kotlin 2.0.20；`compileSdk` 35、`minSdk` 24。
+## 构建
 
 ```sh
 ./android/gradlew -p android :app:assembleDebug
 ./android/gradlew -p android :app:testDebugUnitTest
 ```
 
-正式构建需要 JKS 签名环境变量，签名材料不入库：
+发布构建需提供签名参数，签名材料不入库：
 
 ```sh
 export ANDROID_KEYSTORE_PATH=/path/to/release.jks
@@ -79,14 +107,14 @@ export ANDROID_KEY_PASSWORD=...
 ./android/gradlew -p android :app:assembleRelease
 ```
 
-推送到 `v*` 标签时，CI 会用仓库 secrets 签名、校验签名与版本号，并把产物发布到 Releases。
+推送 `v*` 标签会触发 CI：使用仓库 secrets 签名，校验签名、包名与版本号，随后将安装包与校验文件上传至 Releases。
 
 ## 许可
 
-**AGPL-3.0-or-later**
+[AGPL-3.0-or-later](LICENSE)
 
-- [teikengstudio/XMPlus](https://github.com/teikengstudio/XMPlus) —— 本项目的功能与实现参考来源。
-- [sld272/Ximalaya-Downloader-Next](https://github.com/sld272/Ximalaya-Downloader-Next) —— 登录与签名算法来源。
-- 感谢 [LINUX DO](https://linux.do/) 社区的技术交流氛围。
+- [teikengstudio/XMPlus](https://github.com/teikengstudio/XMPlus)：功能与实现参考。
+- [sld272/Ximalaya-Downloader-Next](https://github.com/sld272/Ximalaya-Downloader-Next)：登录与签名算法参考。
+- 感谢 [LINUX DO](https://linux.do/) 社区提供的技术交流环境。
 
-本项目与喜马拉雅官方无关，仅供个人学习与自用，请使用自己的账号并遵守服务条款。
+本项目与喜马拉雅官方无关，仅供个人学习与自用，请使用自有账号并遵守服务条款。
