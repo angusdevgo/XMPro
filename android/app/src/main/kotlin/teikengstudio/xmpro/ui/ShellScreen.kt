@@ -341,8 +341,12 @@ fun ShellScreen(
             }
         }
 
-        state.rewardTasks?.let { text ->
-            RewardTasksDialog(text = text, onDismiss = viewModel::closeRewardTasks)
+        state.rewardTiers?.let { tiers ->
+            RewardTasksDialog(
+                tiers = tiers,
+                raw = state.rewardTasks,
+                onDismiss = viewModel::closeRewardTasks,
+            )
         }
 
         // The now-playing page owns the screen: the mini player and the nav pill

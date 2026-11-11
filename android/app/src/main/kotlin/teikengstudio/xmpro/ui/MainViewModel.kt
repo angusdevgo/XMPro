@@ -74,7 +74,9 @@ data class UiState(
     val listeningError: String? = null,
     val accounts: List<AccountSummary> = emptyList(),
     val autoClaim: Boolean = false,
-    /** Raw welfare task list, shown in the diagnostics dialog. */
+    /** Welfare tiers, shown in the diagnostics dialog. */
+    val rewardTiers: List<teikengstudio.xmpro.api.RewardTier>? = null,
+    /** Raw welfare task payload, kept for cases the summary cannot explain. */
     val rewardTasks: String? = null,
     val accountBusy: Boolean = false,
     /** Playback queue and the index of the track that is loaded. */
@@ -1133,8 +1135,10 @@ class MainViewModel(private val context: Context, private val container: AppCont
         viewModelScope.launch {
             _state.update { it.copy(accountBusy = true) }
             try {
-                val text = withContext(Dispatchers.IO) { container.rewardTasks(identity) }
-                _state.update { it.copy(rewardTasks = text) }
+                val (tiers, text) = withContext(Dispatchers.IO) {
+                    container.rewardTiers(identity) to container.rewardTasks(identity)
+                }
+                _state.update { it.copy(rewardTiers = tiers, rewardTasks = text) }
             } catch (error: Exception) {
                 _state.update { it.copy(message = describe(error)) }
             } finally {
@@ -1143,7 +1147,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
-    fun closeRewardTasks() = _state.update { it.copy(rewardTasks = null) }
+    fun closeRewardTasks() = _state.update { it.copy(rewardTiers = null, rewardTasks = null) }
 
     fun claimOnce(identity: String) = accountAction({
         container.claimOnce(identity)

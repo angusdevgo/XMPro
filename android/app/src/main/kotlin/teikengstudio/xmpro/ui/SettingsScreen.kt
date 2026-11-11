@@ -1773,9 +1773,15 @@ private fun AboutPage(
     }
 }
 
-/** Read-only dump of the welfare task payload, for diagnosing claim failures. */
+/** Welfare tiers with their last grant time, plus the raw payload on demand. */
 @Composable
-fun RewardTasksDialog(text: String, onDismiss: () -> Unit) {
+fun RewardTasksDialog(
+    tiers: List<teikengstudio.xmpro.api.RewardTier>,
+    raw: String?,
+    onDismiss: () -> Unit,
+) {
+    var showRaw by remember { mutableStateOf(false) }
+    val total = tiers.sumOf { it.seconds }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("福利任务") },
@@ -1786,18 +1792,63 @@ fun RewardTasksDialog(text: String, onDismiss: () -> Unit) {
                     .heightIn(max = 420.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                Text(
-                    "以下为官方接口返回的原始任务与限额字段，令牌类字段已隐去。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                Text(
-                    text,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                if (showRaw) {
+                    Text(
+                        raw ?: "暂无原始数据",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                } else {
+                    Text(
+                        "各档位可领取的听时与最近一次到账时间。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    )
+                    for (tier in tiers) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                tier.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.width(72.dp),
+                            )
+                            Text(
+                                formatListeningTime(tier.seconds),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                if (tier.receiveTime > 0) {
+                                    SimpleDateFormat("M-d HH:mm", Locale.CHINA)
+                                        .format(Date(tier.receiveTime))
+                                } else {
+                                    "未领取"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("全部领完可得", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            formatListeningTime(total),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = { showRaw = !showRaw },
+                    modifier = Modifier.padding(top = 4.dp),
+                ) { Text(if (showRaw) "看汇总" else "看原始数据", style = MaterialTheme.typography.labelMedium) }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },

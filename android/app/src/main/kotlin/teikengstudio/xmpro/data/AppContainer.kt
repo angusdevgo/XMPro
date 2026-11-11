@@ -263,6 +263,9 @@ class AppContainer(context: Context) {
     /** Welfare task list as plain JSON, for the diagnostics dialog. */
     fun rewardTasks(identity: String): String = XmlyRewards(client(identity)).taskDiagnostics()
 
+    fun rewardTiers(identity: String): List<teikengstudio.xmpro.api.RewardTier> =
+        XmlyRewards(client(identity)).tiers()
+
     fun resumeRewards(identity: String) {
         store.transaction { state ->
             state.optJSONObject("accounts")?.optJSONObject(identity)?.put("rewardPaused", false)

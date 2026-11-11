@@ -6,6 +6,15 @@ import org.json.JSONObject
 import teikengstudio.xmpro.model.Quota
 import teikengstudio.xmpro.model.XmlyException
 
+/** One welfare tier: how much it grants and when it was last granted. */
+data class RewardTier(
+    val index: Int,
+    val seconds: Int,
+    val label: String,
+    val status: Int,
+    val receiveTime: Long,
+)
+
 /**
  * Listening-time welfare: query the task list and claim more minutes.
  *
@@ -114,6 +123,31 @@ class XmlyRewards(
             if (current.remainingSeconds <= before) break
         }
         return current
+    }
+
+    /**
+     * Welfare tiers as reported by the server.
+     *
+     * `tierDuration` is what one claim of that tier adds, and `receiveTime` is
+     * when it was last granted, so the list doubles as a claim log.
+     */
+    fun tiers(): List<RewardTier> {
+        val data = tasks().optJSONObject("data") ?: return emptyList()
+        val list = data.optJSONArray("tierList") ?: return emptyList()
+        val result = ArrayList<RewardTier>(list.length())
+        for (index in 0 until list.length()) {
+            val row = list.optJSONObject(index) ?: continue
+            val seconds = (row.opt("tierDuration") as? Number)?.toInt() ?: continue
+            if (seconds <= 0) continue
+            result += RewardTier(
+                index = (row.opt("index") as? Number)?.toInt() ?: index,
+                seconds = seconds,
+                label = row.optString("tierDurationDesc").ifEmpty { "${seconds / 60} 分钟" },
+                status = (row.opt("status") as? Number)?.toInt() ?: -1,
+                receiveTime = (row.opt("receiveTime") as? Number)?.toLong() ?: 0L,
+            )
+        }
+        return result.sortedBy { it.seconds }
     }
 
     /**
