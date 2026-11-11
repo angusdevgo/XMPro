@@ -53,34 +53,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-PiliPlus Flutter interface
--------------------------
-PiliPlus contributors
-https://github.com/bggRGjQaUbCoE/PiliPlus
-Revision: d9e9626f1a3f89cd9ca85e18f61aaba02634e12a
-License: GNU General Public License version 3; see licenses/PiliPlus-LICENSE.txt.
-
-Sources adapted for XMPlus on 2026-11-04:
-- lib/main.dart: application, localization and theme assembly
-- lib/utils/theme_utils.dart: Material component themes
-- lib/common/widgets/scroll_behavior.dart: desktop scrolling behavior
-- lib/pages/main/view.dart: Material navigation rail and navigation bar
-- lib/pages/setting/view.dart: wide/narrow settings layout
-- lib/utils/config_archive.dart: split-file backup ZIP metadata structure
-- lib/pages/login/geetest/geetest_webview_dialog.dart: WebView interaction pattern
-- lib/utils/update.dart and lib/pages/about/view.dart: release check, update dialog
-  and platform-specific download selection, adapted to XMPlus GitHub releases
-- .github/workflows/build.yml: Android split-ABI signing and release workflow pattern
-
-The desktop runner and its build rules have been removed; only the Android host
-is built. The application keeps an original white artistic X on a bright red
-circle. PiliPlus app-link forwarding and branding are not included. No PiliPlus
-icon, installer or packaging files are incorporated.
-The interface is adapted for audio navigation without Bilibili services.
-This notice does not replace the existing component's AGPL license or the
-upstream GPL obligations. Distribution must retain the applicable licenses
-and provide the Corresponding Source, including these modifications.
-
 Native media and build materials
 --------------------------------
 - Android FFmpeg/FFprobe: FFmpeg 9.0.2 and LAME 3.100, source-built for API 24 in

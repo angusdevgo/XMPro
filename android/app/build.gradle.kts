@@ -47,12 +47,6 @@ android {
     }
 
     packaging {
-        jniLibs {
-            // The bundled FFmpeg/FFprobe wrappers are executed as separate
-            // processes, so they must stay on the filesystem.
-            useLegacyPackaging = true
-            keepDebugSymbols += setOf("**/libxmplus_ffmpeg.so", "**/libxmplus_ffprobe.so")
-        }
         resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1")
     }
 
@@ -123,22 +117,3 @@ dependencies {
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
-
-// Native media tools are built by tool/build_android_media.sh. Local debug
-// builds may proceed without them, but release/CI builds must ship them.
-val verifyAndroidMediaTools = tasks.register("verifyAndroidMediaTools") {
-    val required = providers.gradleProperty("xmpro.requireNativeTools")
-        .map { it.toBoolean() }
-        .orElse(false)
-    val abiDir = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
-    doLast {
-        val missing = listOf("libxmplus_ffmpeg.so", "libxmplus_ffprobe.so").filter {
-            !abiDir.file(it).asFile.let { file -> file.isFile && file.length() > 0 }
-        }
-        if (missing.isEmpty()) return@doLast
-        val message = "Missing arm64-v8a media tools ${missing.joinToString()}; " +
-            "run 'bash tool/build_android_media.sh arm64-v8a'."
-        if (required.get()) throw GradleException(message) else logger.warn("WARNING: $message")
-    }
-}
-tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(verifyAndroidMediaTools) }

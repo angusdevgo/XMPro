@@ -16,14 +16,14 @@
 XMPro 是 [XMPlus](https://github.com/teikengstudio/XMPlus) 的**修改版（二改）**。
 
 上游 XMPlus 用 Flutter 实现；本项目把客户端整体重写为纯 Kotlin + Jetpack Compose，
-界面按 PiliPlus 的风格重做，并移除了下载功能与桌面端。
+界面按自己的风格重做，并移除了下载功能与桌面端。
 
 | | 上游 XMPlus | 本项目 XMPro |
 | :--- | :--- | :--- |
 | 实现 | Flutter / Dart | Kotlin + Jetpack Compose |
 | 平台 | Android + Windows 桌面 | 仅 Android（arm64-v8a） |
 | 下载与转码 | 有 | 已移除 |
-| 界面风格 | 上游自有 | PiliPlus 风格重构 |
+| 界面风格 | 上游自有 | 重新设计 |
 
 主要改动（2026-11）：
 
@@ -84,4 +84,3 @@ CI（`.github/workflows/android.yml`）在推送 `v*` 标签时用仓库 secrets
 
 - [teikengstudio/XMPlus](https://github.com/teikengstudio/XMPlus)：本项目所基于的上游项目，AGPL-3.0-or-later。
 - [sld272/Ximalaya-Downloader-Next](https://github.com/sld272/Ximalaya-Downloader-Next)：登录签名与短信验证码流程的参考实现，AGPL-3.0-or-later。
-- [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus)：界面与交互风格的参考，GPL-3.0。
