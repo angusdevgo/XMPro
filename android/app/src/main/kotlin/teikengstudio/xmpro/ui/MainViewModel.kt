@@ -124,6 +124,12 @@ class MainViewModel(private val context: Context, private val container: AppCont
     private val playback = container.playback
     private val login = XmlyLogin(deviceOverride = container.deviceId)
 
+    /**
+     * Bumped on every play request. A slow resolve from an earlier tap must not
+     * start over the track the user picked afterwards.
+     */
+    private var playRequest = 0
+
     private var sessionTrack: Track? = null
     private var sessionStartedAt = 0L
     private var sleepJob: Job? = null
@@ -430,6 +436,40 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     fun play(track: Track, resumePositionMs: Long = 0) = playQueue(listOf(track), 0, resumePositionMs)
 
+    /**
+     * Plays [track] together with the album page it belongs to.
+     *
+     * Both history entries and search results only carry a single episode, so
+     * playing them directly left the queue with one item: next/previous did
+     * nothing and playback stopped at the end. The containing page is loaded
+     * instead, which keeps neighbouring episodes reachable; the page is found
+     * from the episode ordinal so no extra lookup is needed first.
+     */
+    fun playInAlbum(track: Track, resumePositionMs: Long = 0) {
+        val album = track.albumKey
+        if (album.isEmpty()) {
+            play(track, resumePositionMs)
+            return
+        }
+        viewModelScope.launch {
+            val located = runCatching {
+                withContext(Dispatchers.IO) {
+                    val client = container.client(container.activeAccount)
+                    val data = client.albumPageWith(album, track.id) ?: return@withContext null
+                    val index = data.tracks.indexOfFirst { it.id == track.id }
+                    if (index >= 0) data.tracks to index else null
+                }
+            }.getOrNull()
+            if (located != null) {
+                playQueue(located.first, located.second, resumePositionMs)
+            } else {
+                // Album lookup failed or the episode is gone: keep the single
+                // track playable rather than dropping the tap.
+                play(track, resumePositionMs)
+            }
+        }
+    }
+
     /** Plays [track] inside [queue] so next/previous walk the same list. */
     fun playQueue(queue: List<Track>, index: Int, resumePositionMs: Long = 0) {
         val track = queue.getOrNull(index) ?: return
@@ -438,24 +478,30 @@ class MainViewModel(private val context: Context, private val container: AppCont
         _state.update {
             it.copy(message = null, queue = queue, queueIndex = index)
         }
+        val request = ++playRequest
         viewModelScope.launch {
             try {
                 val quality = _state.value.quality
                 val resolved = withContext(Dispatchers.IO) {
                     container.client(container.activeAccount).resolve(track.number, quality)
                 }
+                // A newer tap already won; drop this result instead of overriding it.
+                if (request != playRequest) return@launch
                 val startAt = if (resumePositionMs > 0) {
                     resumePositionMs
                 } else {
                     introSeekMs(resolved.track.duration)
                 }
                 playback.start(resolved.url, resolved.track.title, startAt) {
+                    if (request != playRequest) return@start
                     sessionTrack = resolved.track
                     sessionStartedAt = System.currentTimeMillis()
                     _state.update { it.copy(playing = resolved.track) }
                 }
             } catch (error: Exception) {
-                _state.update { it.copy(message = describe(error)) }
+                if (request == playRequest) {
+                    _state.update { it.copy(message = describe(error)) }
+                }
             }
         }
     }
@@ -540,6 +586,8 @@ class MainViewModel(private val context: Context, private val container: AppCont
     fun seekTo(positionMs: Long) = playback.seekTo(positionMs)
 
     fun stopPlayback() {
+        // Cancel any in-flight resolve so stopping cannot be undone by a late reply.
+        playRequest++
         syncProgress()
         sessionTrack = null
         sessionStartedAt = 0

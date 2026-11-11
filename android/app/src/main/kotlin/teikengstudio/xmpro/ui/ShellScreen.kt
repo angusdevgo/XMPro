@@ -163,7 +163,7 @@ fun ShellScreen(
                         onClearSearch = viewModel::clearSearch,
                         onRefreshHome = viewModel::loadHome,
                         onOpenAlbum = viewModel::openAlbum,
-                        onPlay = { viewModel.play(it) },
+                        onPlay = { viewModel.playInAlbum(it) },
                         onSelectChannel = viewModel::selectChannel,
                         onSelectTab = viewModel::selectTab,
                         onMoveChannel = viewModel::moveChannel,
@@ -181,7 +181,8 @@ fun ShellScreen(
                         onOpenAlbum = viewModel::openAlbum,
                         onPlay = { track, positionMs ->
                             if (positionMs > 0) {
-                                viewModel.play(track, positionMs)
+                                // History entries carry a saved position.
+                                viewModel.playInAlbum(track, positionMs)
                             } else {
                                 viewModel.playUpdates(track)
                             }

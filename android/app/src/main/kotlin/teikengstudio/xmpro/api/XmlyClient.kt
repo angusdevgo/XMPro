@@ -171,6 +171,29 @@ class XmlyClient(
         return SearchPage(tracks, found, page, pageSize, total, kind)
     }
 
+    /**
+     * Loads the album page that contains [trackId], or null when it is not found
+     * within [maxPages].
+     *
+     * The catalogue endpoint ignores a `trackId` filter, so the only reliable way
+     * to find where an episode lives is to walk the pages. The first page is
+     * checked alone because most taps land there; searching further is bounded so
+     * a bogus id cannot walk a 3000-episode album.
+     */
+    fun albumPageWith(albumId: String, trackId: String, maxPages: Int = 20): AlbumPage? {
+        val wanted = trackId.substringAfter(':')
+        var page = 1
+        var total = 0
+        while (page <= maxPages) {
+            val data = album(albumId, page = page)
+            total = data.total
+            if (data.tracks.any { it.id == "xmly:$wanted" }) return data
+            if (page * data.pageSize >= total) return null
+            page++
+        }
+        return null
+    }
+
     fun album(albumId: String, page: Int = 1, pageSize: Int = XMLY_ALBUM_PAGE_SIZE, ascending: Boolean = true): AlbumPage {
         val number = xmlyIdentifier(albumId)
         paging(page, pageSize, XMLY_ALBUM_PAGE_SIZE)
