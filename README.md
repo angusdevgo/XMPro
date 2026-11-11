@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="160" height="160" src="assets/branding/xmplus.png" alt="XMPro">
+  <img width="160" height="160" src="assets/branding/xmpro.png" alt="XMPro">
   <h1>XMPro</h1>
   <p>喜马拉雅第三方收听客户端 · Kotlin + Jetpack Compose</p>
 
