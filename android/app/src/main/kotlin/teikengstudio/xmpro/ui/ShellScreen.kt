@@ -267,6 +267,7 @@ fun ShellScreen(
                     onBack = viewModel::closeAlbum,
                     onPlay = viewModel::playAlbum,
                     onSubscribe = viewModel::setSubscribed,
+                    onSelectRange = viewModel::setAlbumRange,
                 )
             }
         }

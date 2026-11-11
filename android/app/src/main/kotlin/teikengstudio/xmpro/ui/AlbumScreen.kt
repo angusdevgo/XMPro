@@ -16,14 +16,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
@@ -31,18 +34,24 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,6 +59,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import teikengstudio.xmpro.model.Track
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumScreen(
     state: UiState,
@@ -57,6 +67,7 @@ fun AlbumScreen(
     onBack: () -> Unit,
     onPlay: (Track) -> Unit,
     onSubscribe: (String, Boolean) -> Unit,
+    onSelectRange: (Int?, Int?) -> Unit,
 ) {
     BackHandler(onBack = onBack)
 
@@ -64,6 +75,8 @@ fun AlbumScreen(
     val album = page?.album
     val subscribed = album != null && state.subscriptions.any { it.album.id == album.id }
     var expandIntro by remember { mutableStateOf(false) }
+    var rangeSheet by remember { mutableStateOf(false) }
+    val window = state.albumTracks()
 
     Column(
         Modifier
@@ -263,12 +276,43 @@ fun AlbumScreen(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(Modifier.weight(1f))
+                        // Long serials page 200 at a time; the range picker both
+                        // filters and fetches so 900..1000 is reachable.
+                        Surface(
+                            onClick = { rangeSheet = true },
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Filled.Tune,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    if (state.albumRangeStart != null) {
+                                        "${state.albumRangeStart}-${state.albumRangeEnd}"
+                                    } else {
+                                        "选集区间"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                     }
                 }
 
-                itemsIndexed(page.tracks, key = { _, track -> track.id }) { index, track ->
+                items(window, key = { track -> track.id }) { track ->
                     val active = state.playing?.id == track.id
-                    val order = track.orderNo ?: (index + 1)
+                    val order = track.orderNo ?: (page.tracks.indexOf(track) + 1)
                     Surface(
                         onClick = { onPlay(track) },
                         shape = RoundedCornerShape(14.dp),
@@ -344,9 +388,154 @@ fun AlbumScreen(
                     }
                 }
             }
+            if (rangeSheet) {
+                val total = page.total.coerceAtLeast(page.tracks.size)
+                ModalBottomSheet(
+                    onDismissRequest = { rangeSheet = false },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                ) {
+                    RangePicker(
+                        total = total,
+                        currentStart = state.albumRangeStart,
+                        currentEnd = state.albumRangeEnd,
+                        busy = state.albumRangeBusy,
+                        onApply = { start, end ->
+                            rangeSheet = false
+                            onSelectRange(start, end)
+                        },
+                    )
+                }
+            }
         } else if (!state.albumLoading && state.albumError == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("选择专辑查看内容", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** Episode window picker: type a start/end pair or tap a quick segment. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun RangePicker(
+    total: Int,
+    currentStart: Int?,
+    currentEnd: Int?,
+    busy: Boolean,
+    onApply: (Int?, Int?) -> Unit,
+) {
+    var startText by rememberSaveable { mutableStateOf(currentStart?.toString() ?: "") }
+    var endText by rememberSaveable { mutableStateOf(currentEnd?.toString() ?: "") }
+    val start = startText.trim().toIntOrNull()
+    val end = endText.trim().toIntOrNull()
+    val invalid = (start != null && end != null && start > end) ||
+        (start != null && start > total) ||
+        (end != null && end > total)
+
+    Column(Modifier.padding(horizontal = 20.dp)) {
+        Text(
+            "选集区间",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            "共 $total 集，可只显示其中一段，例如 101 到 200",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = startText,
+                onValueChange = { input -> startText = input.filter { it.isDigit() }.take(5) },
+                label = { Text("起始集") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+            Text("至", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedTextField(
+                value = endText,
+                onValueChange = { input -> endText = input.filter { it.isDigit() }.take(5) },
+                label = { Text("结束集") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (invalid) {
+            Text(
+                "请填写 1 到 $total 之间的集数，且起始不大于结束",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        if (total > 100) {
+            Text(
+                "快捷分段",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 16.dp, bottom = 6.dp),
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items((0 until (total + 99) / 100).toList()) { index ->
+                    val from = index * 100 + 1
+                    val to = minOf((index + 1) * 100, total)
+                    val selected = currentStart == from && currentEnd == to
+                    Surface(
+                        onClick = {
+                            startText = from.toString()
+                            endText = to.toString()
+                        },
+                        shape = RoundedCornerShape(50),
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                    ) {
+                        Text(
+                            "$from-$to",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 18.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { onApply(null, null) }) { Text("显示全部") }
+            Spacer(Modifier.weight(1f))
+            Button(
+                onClick = { onApply(start, end) },
+                enabled = !busy && !invalid && start != null && end != null,
+            ) {
+                if (busy) {
+                    Text("加载中…")
+                } else if (start != null && end != null) {
+                    Text("查看 $start-$end 集")
+                } else {
+                    Text("查看")
+                }
             }
         }
     }

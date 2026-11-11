@@ -39,6 +39,10 @@ data class UiState(
     val tracks: List<Track> = emptyList(),
     val albums: List<Album> = emptyList(),
     val album: AlbumPage? = null,
+    /** Episode window currently shown for the open album, if limited. */
+    val albumRangeStart: Int? = null,
+    val albumRangeEnd: Int? = null,
+    val albumRangeBusy: Boolean = false,
     val albumLoading: Boolean = false,
     val albumError: String? = null,
     val playing: Track? = null,
@@ -93,6 +97,19 @@ data class UiState(
     val socialLoading: Boolean = false,
     val favoriteIds: Set<String> = emptySet(),
 )
+
+/**
+ * Episodes the album screen should show: everything, or only the selected
+ * `albumRangeStart..albumRangeEnd` window.
+ */
+fun UiState.albumTracks(): List<teikengstudio.xmpro.model.Track> {
+    val page = album ?: return emptyList()
+    val from = albumRangeStart ?: return page.tracks
+    val to = albumRangeEnd ?: Int.MAX_VALUE
+    return page.tracks.filterIndexed { index, track ->
+        (track.orderNo ?: (index + 1)) in from..to
+    }
+}
 
 class MainViewModel(private val context: Context, private val container: AppContainer) : ViewModel() {
     private var ticker: Job? = null
@@ -335,7 +352,68 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
-    fun closeAlbum() = _state.update { it.copy(album = null, albumError = null, albumLoading = false) }
+    fun closeAlbum() = _state.update {
+        it.copy(
+            album = null,
+            albumError = null,
+            albumLoading = false,
+            albumRangeStart = null,
+            albumRangeEnd = null,
+            albumRangeBusy = false,
+        )
+    }
+
+    /**
+     * Limits the episode list to `[start]..[end]` and loads whatever album pages
+     * that window needs. Long serials run to thousands of episodes while the
+     * album endpoint pages 200 at a time, so jumping to 900..1000 has to fetch.
+     */
+    fun setAlbumRange(start: Int?, end: Int?) {
+        val page = _state.value.album ?: return
+        if (start == null || end == null) {
+            _state.update { it.copy(albumRangeStart = null, albumRangeEnd = null) }
+            return
+        }
+        val total = maxOf(page.total, page.tracks.size)
+        val from = start.coerceIn(1, total)
+        val to = end.coerceIn(from, total)
+        if (page.tracks.size >= to) {
+            _state.update { it.copy(albumRangeStart = from, albumRangeEnd = to) }
+            return
+        }
+        _state.update { it.copy(albumRangeStart = from, albumRangeEnd = to, albumRangeBusy = true) }
+        viewModelScope.launch {
+            try {
+                val size = teikengstudio.xmpro.model.XMLY_ALBUM_PAGE_SIZE
+                val firstPage = (page.tracks.size / size) + 1
+                val lastPage = (to + size - 1) / size
+                val merged = withContext(Dispatchers.IO) {
+                    val client = container.client(container.activeAccount)
+                    var tracks = page.tracks
+                    for (index in firstPage..lastPage) {
+                        val next = client.album(page.album.id, page = index)
+                        tracks = (tracks + next.tracks).distinctBy { track -> track.id }
+                    }
+                    tracks.sortedBy { track -> track.orderNo ?: Int.MAX_VALUE }
+                }
+                _state.update { current ->
+                    val existing = current.album ?: return@update current
+                    current.copy(
+                        album = teikengstudio.xmpro.model.AlbumPage(
+                            album = existing.album,
+                            tracks = merged,
+                            page = existing.page,
+                            pageSize = existing.pageSize,
+                            total = existing.total,
+                        ),
+                        albumRangeBusy = false,
+                    )
+                }
+            } catch (error: Exception) {
+                _state.update { it.copy(albumRangeBusy = false, message = describe(error)) }
+            }
+        }
+    }
 
     // ------------------------------------------------------------------ player
 
@@ -371,7 +449,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     /** Plays the currently opened album from [track]'s position. */
     fun playAlbum(track: Track) {
-        val tracks = _state.value.album?.tracks ?: listOf(track)
+        val tracks = _state.value.albumTracks().ifEmpty { listOf(track) }
         playQueue(tracks, tracks.indexOf(track).coerceAtLeast(0))
     }
 
