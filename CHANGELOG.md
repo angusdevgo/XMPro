@@ -1,5 +1,9 @@
 # 更新日志
 
+## 0.1.1
+
+- 更换应用图标：耳机猫线描形象，支持自适应图标与 Android 13 主题图标。
+
 ## 0.1.0
 
 - 首个 Kotlin + Jetpack Compose 版本，客户端由 Flutter 重写，仅发布 Android arm64-v8a。
