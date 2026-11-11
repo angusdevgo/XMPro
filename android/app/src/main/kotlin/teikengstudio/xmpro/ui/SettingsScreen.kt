@@ -1653,6 +1653,12 @@ private fun AboutPage(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            Text(
+                "by Angus",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
 
         GroupTitle("信息")
