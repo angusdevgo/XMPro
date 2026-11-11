@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,8 +38,6 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
@@ -90,9 +90,9 @@ fun PlayerSheet(
     isFavorite: Boolean,
     onSleepTimer: (Int?) -> Unit,
     onSelectQueue: (Int) -> Unit,
+    onQueueRange: (Int?, Int?) -> Unit = { _, _ -> },
     onOpenAlbum: (String) -> Unit = {},
     onSkipTrim: (Boolean, Int, Int, String) -> Unit = { _, _, _, _ -> },
-    onVolume: (Float) -> Unit = {},
 ) {
     val track = state.playing
     var queueOpen by remember { mutableStateOf(false) }
@@ -269,35 +269,6 @@ fun PlayerSheet(
                 )
             }
 
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    if (state.playVolume <= 0.01f) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-                    contentDescription = "音量",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
-                Slider(
-                    value = state.playVolume,
-                    onValueChange = onVolume,
-                    valueRange = 0f..1f,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 10.dp),
-                )
-                Text(
-                    "${(state.playVolume * 100).roundToInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(38.dp),
-                    textAlign = TextAlign.End,
-                )
-            }
-
             val total = state.durationMs.coerceAtLeast(0)
             val shown = if (dragPosition >= 0f) dragPosition.toLong() else state.positionMs
             Slider(
@@ -395,18 +366,62 @@ fun PlayerSheet(
     }
 
     if (queueOpen) {
+        var rangeOpen by remember { mutableStateOf(false) }
         ModalBottomSheet(onDismissRequest = { queueOpen = false }, sheetState = sheetState) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "待播列表 · ${state.queue.size} 集",
+                    "待播列表",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
                 )
+                Spacer(Modifier.weight(1f))
+                // Same slice picker as the album page, applied to the queue.
+                Surface(
+                    onClick = { rangeOpen = !rangeOpen },
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Text(
+                        if (state.queueFrom != null && state.queueTo != null) {
+                            "${state.queueFrom}-${state.queueTo}"
+                        } else {
+                            "共 ${state.queue.size} 集"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
                 TextButton(onClick = onStop) { Text("清空") }
+            }
+            AnimatedVisibility(visible = rangeOpen) {
+                val full = state.queueAll.ifEmpty { state.queue }
+                Column(
+                    Modifier
+                        .heightIn(max = 300.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                ) {
+                    TierGrid(
+                        total = full.size,
+                        selectedStart = state.queueFrom,
+                        selectedEnd = state.queueTo,
+                        onPick = { tier ->
+                            onQueueRange(tier.from, tier.to)
+                            rangeOpen = false
+                        },
+                    )
+                    TextButton(
+                        onClick = {
+                            onQueueRange(null, null)
+                            rangeOpen = false
+                        },
+                        modifier = Modifier.padding(top = 4.dp),
+                    ) { Text("显示全部") }
+                }
             }
             LazyColumn(Modifier.navigationBarsPadding()) {
                 itemsIndexed(state.queue) { index, item ->

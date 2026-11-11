@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -394,6 +397,12 @@ fun AlbumScreen(
                     onDismissRequest = { rangeSheet = false },
                     sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
                 ) {
+                    // A long serial has dozens of slices; keep the footer reachable.
+                    Column(
+                        Modifier
+                            .heightIn(max = 560.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
                     RangePicker(
                         total = total,
                         currentStart = state.albumRangeStart,
@@ -404,6 +413,7 @@ fun AlbumScreen(
                             onSelectRange(start, end)
                         },
                     )
+                    }
                 }
             }
         } else if (!state.albumLoading && state.albumError == null) {
@@ -439,15 +449,29 @@ private fun RangePicker(
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            "共 $total 集，可只显示其中一段，例如 101 到 200",
+            "共 $total 集，点一段只看这一段",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
+        TierGrid(
+            total = total,
+            selectedStart = currentStart,
+            selectedEnd = currentEnd,
+            enabled = !busy,
+            modifier = Modifier.padding(top = 14.dp),
+            onPick = { tier -> onApply(tier.from, tier.to) },
+        )
+        Text(
+            "或手动输入",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 16.dp, bottom = 2.dp),
+        )
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 16.dp),
+                .padding(top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -476,45 +500,6 @@ private fun RangePicker(
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(top = 6.dp),
             )
-        }
-
-        if (total > 100) {
-            Text(
-                "快捷分段",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 16.dp, bottom = 6.dp),
-            )
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items((0 until (total + 99) / 100).toList()) { index ->
-                    val from = index * 100 + 1
-                    val to = minOf((index + 1) * 100, total)
-                    val selected = currentStart == from && currentEnd == to
-                    Surface(
-                        onClick = {
-                            startText = from.toString()
-                            endText = to.toString()
-                        },
-                        shape = RoundedCornerShape(50),
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                        },
-                    ) {
-                        Text(
-                            "$from-$to",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        )
-                    }
-                }
-            }
         }
 
         Row(

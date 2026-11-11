@@ -83,6 +83,11 @@ data class UiState(
     val accountBusy: Boolean = false,
     /** Playback queue and the index of the track that is loaded. */
     val queue: List<Track> = emptyList(),
+    /** The unfiltered queue, kept so a range can be re-picked. */
+    val queueAll: List<Track> = emptyList(),
+    /** Active slice of the queue, if the user narrowed it. */
+    val queueFrom: Int? = null,
+    val queueTo: Int? = null,
     val queueIndex: Int = 0,
     val speed: Float = 1f,
     val sleepAtMillis: Long? = null,
@@ -495,7 +500,14 @@ class MainViewModel(private val context: Context, private val container: AppCont
         // Report the outgoing track before the player swaps media.
         if (sessionTrack != null && sessionTrack?.id != track.id) syncProgress()
         _state.update {
-            it.copy(message = null, queue = queue, queueIndex = index)
+            it.copy(
+                message = null,
+                queue = queue,
+                queueAll = queue,
+                queueFrom = null,
+                queueTo = null,
+                queueIndex = index,
+            )
         }
         val request = ++playRequest
         viewModelScope.launch {
@@ -528,6 +540,33 @@ class MainViewModel(private val context: Context, private val container: AppCont
     }
 
     /** Plays the currently opened album from [track]'s position. */
+    /**
+     * Restricts the play queue to one slice of episodes.
+     *
+     * The queue keeps the slice it was built from, so a second pick still works
+     * after the first one narrowed it. Playback stays on the same episode when it
+     * falls inside the new slice, otherwise it starts at the slice's first item.
+     */
+    fun setQueueRange(start: Int?, end: Int?) {
+        val current = _state.value
+        val full = current.queueAll.ifEmpty { current.queue }
+        if (full.isEmpty()) return
+        if (start == null || end == null) {
+            val index = full.indexOfFirst { it.id == current.playing?.id }.coerceAtLeast(0)
+            _state.update { it.copy(queueAll = full, queue = full, queueIndex = index, queueFrom = null, queueTo = null) }
+            return
+        }
+        val window = full.filter { track ->
+            val order = track.orderNo ?: (full.indexOf(track) + 1)
+            order in start..end
+        }
+        if (window.isEmpty()) return
+        val index = window.indexOfFirst { it.id == current.playing?.id }.coerceAtLeast(0)
+        _state.update {
+            it.copy(queueAll = full, queue = window, queueIndex = index, queueFrom = start, queueTo = end)
+        }
+    }
+
     fun playAlbum(track: Track) {
         val tracks = _state.value.albumTracks().ifEmpty { listOf(track) }
         playQueue(tracks, tracks.indexOf(track).coerceAtLeast(0))

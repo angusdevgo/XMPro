@@ -432,7 +432,15 @@ class XmlyClient(
         }
         val params = linkedMapOf<String, Any>("device" to "android", "trackId" to id)
         if (reward != null) {
-            params["a1"] = if (reward.newDevice) "1" else reward.remainingSeconds.toString()
+            // a1 is the listening balance the server is asked to trust. A balance
+            // above one day is out of the range it accepts and the call comes back
+            // rejected, which looked like "the second album stopped working" once
+            // the daily allowance had accumulated. Clamp it to one day.
+            params["a1"] = if (reward.newDevice) {
+                "1"
+            } else {
+                reward.remainingSeconds.coerceIn(0, teikengstudio.xmpro.model.MAX_USAGE_SECONDS).toString()
+            }
             params["a2"] = clock().toEpochMilli().toString()
             params["a3"] = "0"
         }

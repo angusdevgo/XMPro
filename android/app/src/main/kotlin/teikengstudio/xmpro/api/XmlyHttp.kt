@@ -297,6 +297,16 @@ class XmlyHttp(
                     definitive = true,
                 )
             }
+            if (code == "4" || code == "-4") {
+                // Parameter or account state rejected: the usual causes are a
+                // listening balance outside the accepted range and a device that
+                // the server no longer recognises.
+                throw XmlyException(
+                    "rejected",
+                    "喜马拉雅拒绝了请求（ret=$code）：听时额度或设备状态异常，请到官方 App 核对后再试",
+                    definitive = true,
+                )
+            }
             if (code == "-400") {
                 // Parameter/signature validation failed; the usual cause is a
                 // clock that is out of sync with the server's.
