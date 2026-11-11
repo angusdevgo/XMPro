@@ -13,7 +13,7 @@
 
 ## 简介
 
-XMPro 是基于**喜马拉雅**内容的第三方 Android 收听客户端，参考[XMPlus](https://github.com/teikengstudio/XMPlus) 并进行Kotlin + Jetpack Compose重构。
+XMPro 是基于**喜马拉雅极速版**内容的第三方 Android 收听客户端，参考[XMPlus](https://github.com/teikengstudio/XMPlus) 并进行Kotlin + Jetpack Compose重构。
 
 ## 功能
 
