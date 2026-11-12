@@ -761,6 +761,18 @@ class MainViewModel(private val context: Context, private val container: AppCont
         _state.update { it.copy(speed = value) }
     }
 
+    /**
+     * Writes the current progress before the app leaves the foreground.
+     *
+     * The cloud history was only written on pause, on a track change and by the
+     * 60 second ticker, so closing the app during the first minute of an episode
+     * recorded nothing at all.
+     */
+    fun onAppBackgrounded() {
+        if (sessionTrack == null) return
+        syncProgress()
+    }
+
     /** [minutes] == null cancels the timer. */
     fun setSleepTimer(minutes: Int?) {
         sleepJob?.cancel()
@@ -1121,6 +1133,15 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 withContext(Dispatchers.IO) {
                     XmlyHistory(container.client(sessionIdentity ?: container.activeAccount))
                         .sync(track, position, started.coerceAtLeast(1), endedAt)
+                }
+            }.onFailure { error ->
+                // A missing or expired login is the one failure the user can act
+                // on; anything else stays silent so playback is never interrupted.
+                val code = (error as? XmlyException)?.code
+                if (code in setOf("auth_required", "login_required", "login_expired")) {
+                    _state.update {
+                        it.copy(message = "登录信息已失效，播放进度未同步")
+                    }
                 }
             }
         }

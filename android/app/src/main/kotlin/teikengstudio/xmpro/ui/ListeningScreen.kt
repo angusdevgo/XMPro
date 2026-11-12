@@ -383,7 +383,13 @@ private fun HistoryTab(
         datedItems(visible, { it.updatedAt }, { record ->
             HistoryLine(record) { onPlay(record.track, (record.positionSeconds * 1000).toLong()) }
         })
-        if (visible.isEmpty()) item { Empty("暂无云历史记录") }
+        if (visible.isEmpty()) {
+            item {
+                // An empty list means two different things: nothing listened to
+                // yet, or no account to read the cloud history from.
+                Empty(if (state.signedIn) "暂无云历史记录" else "登录后可查看云端历史")
+            }
+        }
     }
 }
 
