@@ -43,6 +43,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,11 +83,17 @@ fun ListeningScreen(
     onRemoveBookmark: (String) -> Unit,
     barsVisible: Boolean = true,
     onBarsHidden: (Boolean) -> Unit = {},
+    onRefreshHistory: () -> Unit = {},
 ) {
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     val filtered = { text: String -> query.isBlank() || text.lowercase().contains(query.lowercase()) }
+
+    // Index 2 is the history page; re-read it whenever it becomes current.
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage == 2) onRefreshHistory()
+    }
 
     Column(Modifier.fillMaxSize()) {
         AnimatedVisibility(

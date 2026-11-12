@@ -96,17 +96,18 @@ class XmlyRewards(
     }
 
     /**
-     * Optional automatic top-up: from below 2 h up to 4 h, at most 64 claims.
+     * Automatic claiming: takes every tier the server is still willing to grant.
      *
-     * Any failure stops the loop and marks [lastError] so the account is paused
-     * until a human checks the official app.
+     * The old pass only ran below two hours and stopped at four, so an account
+     * that already had a balance never claimed anything. The server enforces the
+     * daily and balance caps, so the loop simply stops when a claim is refused.
      */
     fun refresh(enabled: Boolean, quota: () -> Quota): Quota {
         var current = quota()
         lastError = ""
-        if (!enabled || current.remainingSeconds >= LOW_WATER) return current
+        if (!enabled) return current
         for (round in 0 until MAX_CLAIMS) {
-            if (!enabled || current.remainingSeconds >= TARGET) break
+            if (!enabled) break
             val before = current.remainingSeconds
             try {
                 claim()

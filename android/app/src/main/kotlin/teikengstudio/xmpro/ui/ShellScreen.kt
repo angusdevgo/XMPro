@@ -128,11 +128,20 @@ fun ShellScreen(
         barsHidden = false
     }
 
+    // The tab shows freshly played episodes, so it is re-read on every visit.
+    LaunchedEffect(selected) {
+        if (selected == Destination.Listening) viewModel.refreshHistory()
+    }
+
     // Leaving the foreground is the last reliable moment to persist progress.
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) viewModel.onAppBackgrounded()
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.onAppBackgrounded()
+                androidx.lifecycle.Lifecycle.Event.ON_START -> viewModel.onAppForegrounded()
+                else -> Unit
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -194,6 +203,7 @@ fun ShellScreen(
                         state = state,
                         bottomInset = contentBottom,
                         onRefresh = viewModel::refreshListening,
+                        onRefreshHistory = viewModel::refreshHistory,
                         onOpenAlbum = viewModel::openAlbum,
                         onPlay = { track, positionMs ->
                             if (positionMs > 0) {
@@ -232,7 +242,6 @@ fun ShellScreen(
                         onRemoveAccount = viewModel::removeAccount,
                         onQueryQuota = viewModel::queryQuota,
                         onClaimOnce = viewModel::claimOnce,
-                        onRewardTasks = viewModel::loadRewardTasks,
                         onResumeRewards = viewModel::resumeRewards,
                         onAutoClaim = viewModel::setAutoClaim,
                         onSyncProfile = { viewModel.syncProfiles(manual = true) },
@@ -369,15 +378,6 @@ fun ShellScreen(
                     onRetryComments = viewModel::retryComments,
                 )
             }
-        }
-
-        state.rewardTiers?.let { tiers ->
-            RewardTasksDialog(
-                tiers = tiers,
-                raw = state.rewardTasks,
-                quotaRaw = state.quotaRaw,
-                onDismiss = viewModel::closeRewardTasks,
-            )
         }
 
         // The now-playing page owns the screen: the mini player and the nav pill

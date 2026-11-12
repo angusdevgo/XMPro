@@ -112,9 +112,8 @@ fun SettingsScreen(
     onRemoveAccount: (String) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
-    onRewardTasks: (String) -> Unit,
-    onResumeRewards: (String) -> Unit,
     onAutoClaim: (Boolean) -> Unit,
+    onResumeRewards: (String) -> Unit,
     onSyncProfile: () -> Unit,
     onRenameAccount: (String, String) -> Unit,
     onQuality: (String) -> Unit,
@@ -154,7 +153,7 @@ fun SettingsScreen(
                 onNavigate = { page = it },
                 onQueryQuota = onQueryQuota,
                 onClaimOnce = onClaimOnce,
-                onRewardTasks = onRewardTasks,
+                onAutoClaim = onAutoClaim,
                 onSwitchAccount = onSwitchAccount,
                 onCopyCookie = onCopyCookie,
                 onOpenSocial = onOpenSocial,
@@ -177,8 +176,6 @@ fun SettingsScreen(
                         onCopyCookie = onCopyCookie,
                         onRemoveAccount = onRemoveAccount,
                         onQueryQuota = onQueryQuota,
-                        onClaimOnce = onClaimOnce,
-                        onRewardTasks = onRewardTasks,
                         onResumeRewards = onResumeRewards,
                         onAutoClaim = onAutoClaim,
                         onSyncProfile = onSyncProfile,
@@ -406,7 +403,7 @@ private fun SettingsRoot(
     onNavigate: (SettingsPage) -> Unit,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
-    onRewardTasks: (String) -> Unit,
+    onAutoClaim: (Boolean) -> Unit,
     onSwitchAccount: (String) -> Unit,
     onCopyCookie: (String) -> Unit,
     onOpenSocial: (String) -> Unit,
@@ -429,7 +426,7 @@ private fun SettingsRoot(
                 account = current,
                 onQueryQuota = onQueryQuota,
                 onClaimOnce = onClaimOnce,
-                onRewardTasks = onRewardTasks,
+                onAutoClaim = onAutoClaim,
                 onSwitchAccount = onSwitchAccount,
                 onCopyCookie = onCopyCookie,
                 onOpenSocial = onOpenSocial,
@@ -481,7 +478,7 @@ private fun ProfileHeader(
     account: AccountSummary?,
     onQueryQuota: (String) -> Unit,
     onClaimOnce: (String) -> Unit,
-    onRewardTasks: (String) -> Unit,
+    onAutoClaim: (Boolean) -> Unit,
     onSwitchAccount: (String) -> Unit,
     onCopyCookie: (String) -> Unit,
     onOpenSocial: (String) -> Unit,
@@ -613,29 +610,44 @@ private fun ProfileHeader(
                 Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Equal thirds: with three labels the last one used to wrap onto
-                // two lines and leave the row uneven.
-                Button(
+                // Neutral like its neighbours: the balance check is not the
+                // primary action on this card.
+                FilledTonalButton(
                     onClick = { onQueryQuota(account.identity) },
                     enabled = !state.accountBusy,
                     shape = CircleShape,
                     contentPadding = PaddingValues(horizontal = 4.dp),
                     modifier = Modifier.weight(1f),
-                ) { Text("查询听时", maxLines = 1, softWrap = false) }
-                FilledTonalButton(
-                    onClick = { onRewardTasks(account.identity) },
-                    enabled = !state.accountBusy,
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(horizontal = 4.dp),
-                    modifier = Modifier.weight(1f),
-                ) { Text("福利任务", maxLines = 1, softWrap = false) }
+                ) { Text("查询时长", maxLines = 1, softWrap = false) }
                 FilledTonalButton(
                     onClick = { onClaimOnce(account.identity) },
                     enabled = !state.accountBusy,
                     shape = CircleShape,
                     contentPadding = PaddingValues(horizontal = 4.dp),
                     modifier = Modifier.weight(1f),
-                ) { Text("领取一次", maxLines = 1, softWrap = false) }
+                ) { Text("单次领取", maxLines = 1, softWrap = false) }
+                // Mirrors the switch further down, shown here because this is
+                // where the balance it affects lives.
+                FilledTonalButton(
+                    onClick = { onAutoClaim(!state.autoClaim) },
+                    enabled = !state.accountBusy,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                        containerColor = if (state.autoClaim) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        if (state.autoClaim) "自动领取·开" else "自动领取·关",
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
         }
     }
@@ -994,8 +1006,6 @@ private fun AccountContent(
     onCopyCookie: (String) -> Unit,
     onRemoveAccount: (String) -> Unit,
     onQueryQuota: (String) -> Unit,
-    onClaimOnce: (String) -> Unit,
-    onRewardTasks: (String) -> Unit,
     onResumeRewards: (String) -> Unit,
     onAutoClaim: (Boolean) -> Unit,
     onSyncProfile: () -> Unit,
@@ -1070,7 +1080,7 @@ private fun AccountContent(
             Column(Modifier.weight(1f)) {
                 Text("自动领取听时", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "不足 2 小时补充至 4 小时，对所有账号生效；领取失败会自动暂停该账号",
+                    "后台自动领取可用的听时，无需手动操作",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
@@ -1958,90 +1968,3 @@ private fun AboutPage(
 }
 
 /** Welfare tiers with their last grant time, plus the raw payload on demand. */
-@Composable
-fun RewardTasksDialog(
-    tiers: List<teikengstudio.xmpro.api.RewardTier>,
-    raw: String?,
-    quotaRaw: String?,
-    onDismiss: () -> Unit,
-) {
-    var section by remember { mutableStateOf(0) }
-    val total = tiers.sumOf { it.seconds }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("福利任务") },
-        text = {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for ((index, label) in listOf("档位", "听时接口", "任务原文").withIndex()) {
-                        FilterChip(
-                            selected = section == index,
-                            onClick = { section = index },
-                            label = { Text(label, style = MaterialTheme.typography.labelMedium) },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                if (section > 0) {
-                    Text(
-                        (if (section == 1) quotaRaw else raw) ?: "暂无数据",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                } else {
-                    Text(
-                        "各档位可领取的听时与最近一次到账时间。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 10.dp),
-                    )
-                    for (tier in tiers) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                tier.label,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.width(72.dp),
-                            )
-                            Text(
-                                formatListeningTime(tier.seconds),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                if (tier.receiveTime > 0) {
-                                    SimpleDateFormat("M-d HH:mm", Locale.CHINA)
-                                        .format(Date(tier.receiveTime))
-                                } else {
-                                    "未领取"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("全部领完可得", style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            formatListeningTime(total),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
-}

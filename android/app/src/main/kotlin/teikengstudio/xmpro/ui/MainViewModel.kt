@@ -74,14 +74,7 @@ data class UiState(
     val listeningLoading: Boolean = false,
     val listeningError: String? = null,
     val accounts: List<AccountSummary> = emptyList(),
-    val autoClaim: Boolean = false,
-    /** Welfare tiers, shown in the diagnostics dialog. */
-    val rewardTiers: List<teikengstudio.xmpro.api.RewardTier>? = null,
-    /** Raw welfare task payload, kept for cases the summary cannot explain. */
-    val rewardTasks: String? = null,
-    /** Raw listening-time payload, for the same reason. */
-    val quotaRaw: String? = null,
-    val accountBusy: Boolean = false,
+    val autoClaim: Boolean = true,    val accountBusy: Boolean = false,
     /** Playback queue and the index of the track that is loaded. */
     val queue: List<Track> = emptyList(),
     /** The unfiltered queue, kept so a range can be re-picked. */
@@ -588,6 +581,10 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     sessionIdentity = container.activeAccount
                     _state.update { it.copy(playing = resolved.track) }
                     publishQueue()
+                    // Record the switch immediately: leaving the app straight
+                    // after picking another episode must still move the cloud
+                    // history, and the exit write may not survive the process.
+                    syncProgress()
                 }
             } catch (error: Exception) {
                 if (request == playRequest) {
@@ -772,6 +769,25 @@ class MainViewModel(private val context: Context, private val container: AppCont
         if (sessionTrack == null) return
         syncProgress()
     }
+
+    /**
+     * Reloads only the cloud history.
+     *
+     * The history tab shows what other episodes and albums were just played, so
+     * it has to be re-read when the tab opens or the app returns; the full
+     * listening refresh would also re-download subscriptions and favourites.
+     */
+    fun refreshHistory() {
+        if (!_state.value.signedIn) return
+        val identity = container.activeAccount ?: return
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { XmlyHistory(container.client(identity)).records() } }
+                .onSuccess { records -> _state.update { it.copy(history = records) } }
+        }
+    }
+
+    /** Reloads the cloud history after the app returns to the foreground. */
+    fun onAppForegrounded() = refreshHistory()
 
     /** [minutes] == null cancels the timer. */
     fun setSleepTimer(minutes: Int?) {
@@ -1501,31 +1517,6 @@ class MainViewModel(private val context: Context, private val container: AppCont
         container.refreshQuota(identity)
     }, "听时已更新")
 
-    fun loadRewardTasks(identity: String) {
-        viewModelScope.launch {
-            _state.update { it.copy(accountBusy = true) }
-            try {
-                val loaded = withContext(Dispatchers.IO) {
-                    Triple(
-                        container.rewardTiers(identity),
-                        container.rewardTasks(identity),
-                        runCatching { container.quotaDiagnostics(identity) }.getOrElse { "读取失败：${describe(it)}" },
-                    )
-                }
-                _state.update {
-                    it.copy(rewardTiers = loaded.first, rewardTasks = loaded.second, quotaRaw = loaded.third)
-                }
-            } catch (error: Exception) {
-                _state.update { it.copy(message = describe(error)) }
-            } finally {
-                _state.update { it.copy(accountBusy = false) }
-            }
-        }
-    }
-
-    fun closeRewardTasks() =
-        _state.update { it.copy(rewardTiers = null, rewardTasks = null, quotaRaw = null) }
-
     fun claimOnce(identity: String) = accountAction({
         container.claimOnce(identity)
     }, "已发送领取请求")
@@ -1620,14 +1611,17 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     fun dismissMessage() = _state.update { it.copy(message = null) }
 
-    /** Optional top-up pass; only runs while automatic claiming is enabled. */
+    /** Background claim pass; runs on start and then every few minutes. */
     private suspend fun autoClaimLoop() {
         while (true) {
+            if (container.autoClaim()) {
+                val identity = container.activeAccount
+                if (identity != null) {
+                    runCatching { withContext(Dispatchers.IO) { container.refreshRewards(identity) } }
+                    _state.update { it.copy(accounts = container.accounts()) }
+                }
+            }
             delay(5 * 60 * 1000L)
-            if (!container.autoClaim()) continue
-            val identity = container.activeAccount ?: continue
-            runCatching { withContext(Dispatchers.IO) { container.refreshRewards(identity) } }
-            _state.update { it.copy(accounts = container.accounts()) }
         }
     }
 
