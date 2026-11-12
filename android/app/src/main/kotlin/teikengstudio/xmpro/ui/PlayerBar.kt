@@ -55,6 +55,9 @@ fun PlayerBar(
         Surface(
             onClick = onOpenPlayer,
             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
+            // A translucent colour matches no scheme role, so the content colour
+            // has to be stated rather than inherited.
+            contentColor = MaterialTheme.colorScheme.onSurface,
             shape = RoundedCornerShape(22.dp),
             modifier = Modifier
                 .fillMaxWidth()

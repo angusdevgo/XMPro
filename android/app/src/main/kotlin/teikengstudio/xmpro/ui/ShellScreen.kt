@@ -143,13 +143,16 @@ fun ShellScreen(
             // paints the theme colour there instead of leaving it to the system.
             .background(MaterialTheme.colorScheme.surface),
     ) {
+        // Everything the shell draws — tabs, mini player, nav pill, overlays —
+        // inherits the theme text colour from here. Without it, any Text that
+        // does not set its own colour falls back to Compose's default black.
+        ThemedContent {
         Box(
             Modifier
                 .fillMaxSize()
                 // safeDrawing covers both the status bar and any display cutout.
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
         ) {
-            ThemedContent {
             AnimatedContent(
                 targetState = selected,
                 transitionSpec = {
@@ -366,8 +369,6 @@ fun ShellScreen(
             )
         }
 
-            }
-
         // The now-playing page owns the screen: the mini player and the nav pill
         // would only cover its transport controls.
         if (!playerOpen) Column(
@@ -394,6 +395,7 @@ fun ShellScreen(
                     selectedIndex = index
                 },
             )
+        }
         }
     }
 }
