@@ -103,6 +103,7 @@ class XmlyHttp(
         signed: Boolean = false,
         readOnly: Boolean = true,
         responseLimit: Int = MAX_RESPONSE_BYTES,
+        headers: Map<String, String> = emptyMap(),
     ): JSONObject = execute(
         method = "POST",
         origin = origin,
@@ -114,7 +115,7 @@ class XmlyHttp(
         signed = signed,
         readOnly = readOnly,
         responseLimit = responseLimit,
-        headers = emptyMap(),
+        headers = headers,
     )
 
     fun postForm(
@@ -126,6 +127,7 @@ class XmlyHttp(
         signed: Boolean = false,
         readOnly: Boolean = true,
         responseLimit: Int = MAX_RESPONSE_BYTES,
+        headers: Map<String, String> = emptyMap(),
     ): JSONObject = execute(
         method = "POST",
         origin = origin,
@@ -139,7 +141,7 @@ class XmlyHttp(
         signed = signed,
         readOnly = readOnly,
         responseLimit = responseLimit,
-        headers = emptyMap(),
+        headers = headers,
     )
 
     private fun execute(

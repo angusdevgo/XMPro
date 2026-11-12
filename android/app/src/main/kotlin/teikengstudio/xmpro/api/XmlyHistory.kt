@@ -119,7 +119,9 @@ class XmlyHistory(
             put("itemId", album)
             put("childId", track.number)
             put("breakSecond", position.toInt().toString())
-            put("direction", direction.toString())
+            // The service parses this field as a number; a quoted "0"/"1" makes
+            // the merge fail with an opaque HTTP 500.
+            put("direction", direction)
         }
         val params = linkedMapOf("mergeRecords" to JSONArray().put(record).toString())
         val signature = signature(params + context())

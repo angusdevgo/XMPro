@@ -69,10 +69,7 @@ class XmlyClient(
             throw XmlyException("login_required", "请先登录", definitive = true)
         }
         val merged = LinkedHashMap<String, String>()
-        if (origin == COLLECTOR) {
-            merged["User-Agent"] = "ting_3.4.10.3(Android,30)"
-            merged["Accept"] = "*/*"
-        }
+        merged.putAll(originHeaders(origin))
         merged.putAll(headers)
         val limit = if (origin == COLLECTOR) 8 * 1024 * 1024 else XmlyHttp.MAX_RESPONSE_BYTES
         return when {
@@ -94,6 +91,7 @@ class XmlyClient(
                 form = form,
                 credentials = bound,
                 readOnly = readOnly,
+                headers = merged,
             )
 
             else -> http.postJson(
@@ -103,6 +101,7 @@ class XmlyClient(
                 json = json ?: emptyMap(),
                 credentials = bound,
                 readOnly = readOnly,
+                headers = merged,
             )
         }
     }
@@ -726,6 +725,20 @@ class XmlyClient(
     companion object {
         const val MOBILE = "https://mobile.ximalaya.com"
         const val COLLECTOR = "https://xdcs-collector.ximalaya.com"
+
+        /**
+         * Headers the collector origin requires on every request.
+         *
+         * Its history merge answers HTTP 500 without the lite app agent, and the
+         * POST helpers used to drop the whole header set, so progress never
+         * synced while the read path kept working.
+         */
+        fun originHeaders(origin: String): Map<String, String> =
+            if (origin == COLLECTOR) {
+                mapOf("User-Agent" to "ting_3.4.10.3(Android,30)", "Accept" to "*/*")
+            } else {
+                emptyMap()
+            }
 
         /** The comment service rejects larger pages. */
         const val MAX_COMMENT_PAGE_SIZE = 30
