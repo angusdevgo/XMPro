@@ -6,6 +6,8 @@ import org.json.JSONObject
 import teikengstudio.xmpro.data.QuotaSource
 import teikengstudio.xmpro.model.Album
 import teikengstudio.xmpro.model.AlbumPage
+import teikengstudio.xmpro.model.Comment
+import teikengstudio.xmpro.model.CommentPage
 import teikengstudio.xmpro.model.ResolvedAudio
 import teikengstudio.xmpro.model.Credentials
 import teikengstudio.xmpro.model.Quota
@@ -323,6 +325,41 @@ class XmlyClient(
     }
 
     /**
+     * One page of comments for [number].
+     *
+     * Served by the web comment service, which answers anonymously, so the tab
+     * works while signed out. Its envelope uses `ret == 200` rather than `0`; the
+     * search origin already expects that code, which is why the request is bound
+     * to it instead of the mobile host.
+     */
+    fun trackComments(number: String, page: Int = 1, pageSize: Int = 20): CommentPage {
+        val id = xmlyIdentifier(number)
+        if (id.isEmpty()) throw XmlyException("invalid_track", "声音编号无效", definitive = true)
+        val size = pageSize.coerceIn(1, MAX_COMMENT_PAGE_SIZE)
+        paging(page, size, MAX_COMMENT_PAGE_SIZE)
+        val payload = request(
+            method = "GET",
+            origin = searchOrigin,
+            path = "/revision/comment/queryComments",
+            query = mapOf("trackId" to id, "page" to page.toString(), "pageSize" to size.toString()),
+            account = false,
+            readOnly = true,
+        )
+        val data = payload.optJSONObject("data") ?: org.json.JSONObject()
+        val list = data.optJSONArray("comments") ?: org.json.JSONArray()
+        val comments = ArrayList<Comment>(list.length())
+        for (index in 0 until list.length()) {
+            commentFromApi(list.optJSONObject(index))?.let { comments.add(it) }
+        }
+        return CommentPage(
+            comments = comments,
+            page = data.optInt("currentPage", page),
+            totalPages = data.optInt("totalPage", 0),
+            total = data.optInt("totalComment", comments.size),
+        )
+    }
+
+    /**
      * Resolves the best playable URL for [number].
      *
      * Paid tracks are only resolved for a logged-in account with listening time
@@ -628,6 +665,37 @@ class XmlyClient(
         raw = publicRaw(raw),
     )
 
+    private fun commentFromApi(raw: org.json.JSONObject?): Comment? {
+        if (raw == null) return null
+        val content = raw.optString("content").trim()
+        // Deleted or system-only entries come back with an empty body.
+        if (content.isEmpty()) return null
+        val replies = raw.optJSONArray("replies")
+        val nested = ArrayList<Comment>(replies?.length() ?: 0)
+        if (replies != null) {
+            for (index in 0 until replies.length()) {
+                commentFromApi(replies.optJSONObject(index))?.let { nested.add(it) }
+            }
+        }
+        return Comment(
+            id = raw.opt("id")?.toString()?.takeIf { it.isNotEmpty() && it != "null" } ?: "",
+            uid = raw.opt("uid")?.toString()?.takeIf { it != "null" } ?: "",
+            nickname = raw.optString("nickname"),
+            avatarUrl = commentAvatar(raw.optString("smallHeader")),
+            content = content,
+            createdAt = raw.optString("createAt"),
+            likes = raw.optInt("likes", 0),
+            replyCount = raw.optInt("replyCount", 0),
+            replies = nested,
+        )
+    }
+
+    private fun commentAvatar(value: String): String? {
+        if (value.isEmpty()) return null
+        val normalized = if (value.startsWith("//")) "https:$value" else value
+        return normalized.takeIf { it.startsWith("https://") }
+    }
+
     private fun trackFromApi(
         raw: Map<String, Any?>,
         albumId: String = "",
@@ -658,6 +726,9 @@ class XmlyClient(
     companion object {
         const val MOBILE = "https://mobile.ximalaya.com"
         const val COLLECTOR = "https://xdcs-collector.ximalaya.com"
+
+        /** The comment service rejects larger pages. */
+        const val MAX_COMMENT_PAGE_SIZE = 30
         const val WELFARE = "https://m.ximalaya.com"
         const val ANONYMOUS = "anonymous"
         val QUALITIES = listOf("m4a_128", "m4a_64", "mp3_64", "mp3_32", "m4a_24")

@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import teikengstudio.xmpro.data.AppContainer
+import teikengstudio.xmpro.ui.theme.ThemedContent
 
 private enum class Destination { Home, Listening, Settings }
 
@@ -148,6 +149,7 @@ fun ShellScreen(
                 // safeDrawing covers both the status bar and any display cutout.
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
         ) {
+            ThemedContent {
             AnimatedContent(
                 targetState = selected,
                 transitionSpec = {
@@ -327,7 +329,7 @@ fun ShellScreen(
                     onPrevious = viewModel::previous,
                     onSkip = viewModel::skipBy,
                     onSeek = viewModel::seekTo,
-                    onCycleSpeed = viewModel::cycleSpeed,
+                    onSpeedChange = viewModel::setSpeed,
                     onFavorite = viewModel::toggleFavoriteOfPlaying,
                     isFavorite = state.playing?.let { track -> track.id in state.favoriteIds } == true,
                     onBookmark = viewModel::saveBookmark,
@@ -341,6 +343,16 @@ fun ShellScreen(
                         viewModel.openAlbum(albumId)
                     },
                     onSkipTrim = viewModel::setSkipTrim,
+                    commentsOpen = state.commentsOpen,
+                    comments = state.comments,
+                    commentsLoading = state.commentsLoading,
+                    commentsError = state.commentsError,
+                    commentsTotal = state.commentsTotal,
+                    commentsHasMore = state.commentsHasMore,
+                    onOpenComments = viewModel::openComments,
+                    onCloseComments = viewModel::closeComments,
+                    onLoadMoreComments = viewModel::loadMoreComments,
+                    onRetryComments = viewModel::retryComments,
                 )
             }
         }
@@ -353,6 +365,8 @@ fun ShellScreen(
                 onDismiss = viewModel::closeRewardTasks,
             )
         }
+
+            }
 
         // The now-playing page owns the screen: the mini player and the nav pill
         // would only cover its transport controls.

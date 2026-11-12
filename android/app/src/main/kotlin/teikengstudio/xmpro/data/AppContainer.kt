@@ -471,6 +471,19 @@ class AppContainer(context: Context) {
         }
     }
 
+    /** Playback speed, clamped to the range the player sheet offers. */
+    fun playSpeed(): Float = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optDouble("speed", 1.0)?.toFloat()
+        ?.takeIf { it.isFinite() }?.coerceIn(0.5f, 3f) ?: 1f
+
+    fun setPlaySpeed(speed: Float) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            val playback = settings.optJSONObject("playback") ?: org.json.JSONObject().also { settings.put("playback", it) }
+            playback.put("speed", speed.coerceIn(0.5f, 3f).toDouble())
+        }
+    }
+
     /** GitHub mirror prefix used by the update check; empty means direct. */
     fun updateMirror(): String = store.state().optJSONObject("settings")
         ?.optString("updateMirror") ?: ""

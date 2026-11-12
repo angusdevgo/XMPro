@@ -822,6 +822,7 @@ private fun SeedSwatches(
                         Modifier
                             .size(10.dp)
                             .clip(CircleShape)
+                            // Deliberately not themed: a QR code is only scannable as black on white.
                             .background(Color.White),
                     )
                 }
@@ -1796,7 +1797,7 @@ private fun AboutPage(
                 modifier = Modifier
                     .size(96.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(androidx.compose.ui.graphics.Color(0xFF0D2E20)),
+                    .background(MaterialTheme.colorScheme.primaryContainer),
             )
             Text(
                 "XMPro",

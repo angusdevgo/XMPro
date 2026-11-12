@@ -6,7 +6,10 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -32,6 +35,10 @@ class PlaybackController(private val context: Context) {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    /** Emits when the current item runs to its end, so the queue can advance. */
+    private val _ended = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    val ended: SharedFlow<Unit> = _ended.asSharedFlow()
+
     private var controller: MediaController? = null
     private var playbackStarted: (() -> Unit)? = null
     private var pending: ((MediaController) -> Unit)? = null
@@ -46,6 +53,10 @@ class PlaybackController(private val context: Context) {
                 else -> "播放失败：${error.errorCodeName}"
             }
             _state.update { it.copy(playing = false) }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED) _ended.tryEmit(Unit)
         }
 
         override fun onEvents(player: Player, events: Player.Events) {
@@ -90,13 +101,27 @@ class PlaybackController(private val context: Context) {
     fun start(
         url: String,
         title: String,
+        artist: String = "",
+        artworkUrl: String? = null,
+        mediaId: String = "",
+        durationMs: Long = 0,
         startPositionMs: Long = 0,
         onStarted: () -> Unit,
     ) {
         playbackStarted = onStarted
         withController { media ->
             _error.value = null
-            media.setMediaItem(mediaItemFor(url), startPositionMs.coerceAtLeast(0))
+            media.setMediaItem(
+                mediaItemFor(
+                    url = url,
+                    mediaId = mediaId.ifBlank { title },
+                    title = title,
+                    artist = artist,
+                    artworkUrl = artworkUrl,
+                    durationMs = durationMs,
+                ),
+                startPositionMs.coerceAtLeast(0),
+            )
             media.prepare()
             media.play()
             _state.update {

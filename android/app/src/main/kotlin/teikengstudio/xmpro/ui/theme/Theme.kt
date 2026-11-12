@@ -3,12 +3,15 @@ package teikengstudio.xmpro.ui.theme
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -190,4 +193,22 @@ fun XmproTheme(
         base
     }
     MaterialTheme(colorScheme = scheme, content = content)
+}
+
+/**
+ * Establishes the theme text colours for a screen that paints its own background.
+ *
+ * Screens built from a plain [androidx.compose.foundation.layout.Box] with a
+ * background modifier never see a [androidx.compose.material3.Surface], so
+ * `LocalContentColor` keeps Compose's default black. Every `Text` that does not
+ * set its own colour then stays black in dark mode. Wrapping the screen body in
+ * this provider hands those defaults back to the theme.
+ */
+@Composable
+fun ThemedContent(content: @Composable () -> Unit) {
+    CompositionLocalProvider(
+        LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+        LocalTextStyle provides MaterialTheme.typography.bodyMedium,
+        content = content,
+    )
 }

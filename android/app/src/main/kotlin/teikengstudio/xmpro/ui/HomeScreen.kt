@@ -658,7 +658,7 @@ private fun AlbumCard(
                             .align(Alignment.BottomEnd)
                             .padding(4.dp)
                             .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.62f))
+                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.62f))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {
                         Text(

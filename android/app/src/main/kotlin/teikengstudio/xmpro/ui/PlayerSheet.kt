@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Forward30
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import teikengstudio.xmpro.model.Track
+import teikengstudio.xmpro.ui.theme.ThemedContent
 
 /**
  * Full-screen "now playing" page: artwork, transport controls, speed, sleep
@@ -84,7 +86,7 @@ fun PlayerSheet(
     onPrevious: () -> Unit,
     onSkip: (Long) -> Unit,
     onSeek: (Long) -> Unit,
-    onCycleSpeed: () -> Unit,
+    onSpeedChange: (Float) -> Unit,
     onFavorite: () -> Unit,
     onBookmark: () -> Unit,
     isFavorite: Boolean,
@@ -93,11 +95,22 @@ fun PlayerSheet(
     onQueueRange: (Int?, Int?) -> Unit = { _, _ -> },
     onOpenAlbum: (String) -> Unit = {},
     onSkipTrim: (Boolean, Int, Int, String) -> Unit = { _, _, _, _ -> },
+    commentsOpen: Boolean = false,
+    comments: List<teikengstudio.xmpro.model.Comment> = emptyList(),
+    commentsLoading: Boolean = false,
+    commentsError: String? = null,
+    commentsTotal: Int = 0,
+    commentsHasMore: Boolean = false,
+    onOpenComments: () -> Unit = {},
+    onCloseComments: () -> Unit = {},
+    onLoadMoreComments: () -> Unit = {},
+    onRetryComments: () -> Unit = {},
 ) {
     val track = state.playing
     var queueOpen by remember { mutableStateOf(false) }
     var timerOpen by remember { mutableStateOf(false) }
     var trimOpen by remember { mutableStateOf(false) }
+    var speedOpen by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableFloatStateOf(-1f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -106,6 +119,7 @@ fun PlayerSheet(
             queueOpen -> queueOpen = false
             timerOpen -> timerOpen = false
             trimOpen -> trimOpen = false
+            speedOpen -> speedOpen = false
             else -> onDismiss()
         }
     }
@@ -117,6 +131,7 @@ fun PlayerSheet(
             .statusBarsPadding()
             .navigationBarsPadding(),
     ) {
+        ThemedContent {
         Column(
             Modifier
                 .fillMaxSize()
@@ -210,9 +225,9 @@ fun PlayerSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 PlayerActionButton(
-                    label = "%.1f×".format(state.speed),
+                    label = speedChipLabel(state.speed),
                     active = state.speed != 1f,
-                    onClick = onCycleSpeed,
+                    onClick = { speedOpen = true },
                 )
                 PlayerActionIcon(
                     icon = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -220,6 +235,13 @@ fun PlayerSheet(
                     tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     enabled = track != null,
                     onClick = onFavorite,
+                )
+                PlayerActionIcon(
+                    icon = Icons.Filled.ChatBubbleOutline,
+                    label = "评论",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    enabled = track != null,
+                    onClick = onOpenComments,
                 )
                 PlayerActionIcon(
                     icon = Icons.Filled.BookmarkBorder,
@@ -363,6 +385,7 @@ fun PlayerSheet(
             }
             Spacer(Modifier.height(20.dp))
         }
+        }
     }
 
     if (queueOpen) {
@@ -437,6 +460,9 @@ fun PlayerSheet(
                         } else {
                             MaterialTheme.colorScheme.surfaceContainerLow
                         },
+                        // The tinted colour above matches no scheme role, so the
+                        // content colour has to be supplied explicitly.
+                        contentColor = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 14.dp, vertical = 3.dp),
@@ -502,6 +528,27 @@ fun PlayerSheet(
                 onChange = { on, head, tail, next -> onSkipTrim(on, head, tail, next) },
             )
         }
+    }
+
+    if (speedOpen) {
+        SpeedSheet(
+            speed = state.speed,
+            onChange = onSpeedChange,
+            onDismiss = { speedOpen = false },
+        )
+    }
+
+    if (commentsOpen) {
+        CommentsSheet(
+            total = commentsTotal,
+            comments = comments,
+            loading = commentsLoading,
+            error = commentsError,
+            hasMore = commentsHasMore,
+            onLoadMore = onLoadMoreComments,
+            onRetry = onRetryComments,
+            onDismiss = onCloseComments,
+        )
     }
 
     if (timerOpen) {
@@ -763,4 +810,10 @@ private fun TrimSlider(
             enabled = enabled,
         )
     }
+}
+
+/** `1.0×`, or `1.25×` when the step is not a half. */
+private fun speedChipLabel(value: Float): String {
+    val text = if (value * 2f == kotlin.math.round(value * 2f)) "%.1f".format(value) else "%.2f".format(value)
+    return "${text}×"
 }

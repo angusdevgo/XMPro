@@ -28,6 +28,7 @@ import teikengstudio.xmpro.model.SubscriptionItem
 import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.UpdateItem
 import teikengstudio.xmpro.model.XmlyException
+import teikengstudio.xmpro.player.PlaybackQueueBridge
 
 data class UiState(
     val signedIn: Boolean = false,
@@ -121,6 +122,15 @@ data class UiState(
     val socialUsers: List<teikengstudio.xmpro.model.SocialUser> = emptyList(),
     val socialLoading: Boolean = false,
     val favoriteIds: Set<String> = emptySet(),
+    /** Comments sheet for the playing track. */
+    val commentsOpen: Boolean = false,
+    val comments: List<teikengstudio.xmpro.model.Comment> = emptyList(),
+    val commentsLoading: Boolean = false,
+    val commentsError: String? = null,
+    /** Last page that loaded successfully; 0 before the first reply. */
+    val commentsPage: Int = 0,
+    val commentsTotal: Int = 0,
+    val commentsHasMore: Boolean = false,
 )
 
 /**
@@ -134,6 +144,22 @@ fun UiState.albumTracks(): List<teikengstudio.xmpro.model.Track> {
     return page.tracks.filterIndexed { index, track ->
         (track.orderNo ?: (index + 1)) in from..to
     }
+}
+
+/** Playback speed bounds, shared by the player sheet and the stored setting. */
+const val MIN_SPEED = 0.5f
+const val MAX_SPEED = 3f
+const val SPEED_STEP = 0.05f
+
+/**
+ * Clamps a speed to the supported range and snaps it to the sheet's step, so a
+ * value restored from storage can never differ from what the slider shows.
+ */
+fun normalizeSpeed(raw: Float): Float {
+    if (!raw.isFinite()) return 1f
+    val clamped = raw.coerceIn(MIN_SPEED, MAX_SPEED)
+    val snapped = kotlin.math.round(clamped / SPEED_STEP) * SPEED_STEP
+    return snapped.coerceIn(MIN_SPEED, MAX_SPEED)
 }
 
 class MainViewModel(private val context: Context, private val container: AppContainer) : ViewModel() {
@@ -170,6 +196,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
             bookmarks = container.bookmarks(),
             quality = container.playbackQuality(),
             playVolume = container.playVolume(),
+            speed = normalizeSpeed(container.playSpeed()),
             updateMirror = container.updateMirror(),
             skipTrimEnabled = container.skipTrimEnabled(),
             skipTrimMode = container.skipTrimMode(),
@@ -201,6 +228,19 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 if (player.playing) startTicker() else ticker?.cancel()
             }
         }
+        // The notification and Bluetooth controls live in the service, which owns
+        // no queue: episode changes have to come back through the bridge.
+        viewModelScope.launch {
+            PlaybackQueueBridge.commands.collect { command ->
+                when (command) {
+                    PlaybackQueueBridge.Command.Next -> next()
+                    PlaybackQueueBridge.Command.Previous -> previous()
+                }
+            }
+        }
+        // A track that runs to its end stops the player; roll on to the queue's
+        // next episode instead of stopping silently.
+        viewModelScope.launch { playback.ended.collect { onTrackEnded() } }
         viewModelScope.launch { autoClaimLoop() }
         if (initialAccounts.isNotEmpty()) syncProfiles()
     }
@@ -524,12 +564,30 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     introSeekMs(resolved.track.duration)
                 }
                 playback.setVolume(_state.value.playVolume)
-                playback.start(resolved.url, resolved.track.title, startAt) {
+                playback.setSpeed(_state.value.speed)
+                // The resolve payload does not always carry the length, but the
+                // catalogue entry does; the notification needs it to show a total.
+                val durationSeconds = resolved.track.duration.takeIf { it > 0 }
+                    ?: queue.getOrNull(index)?.duration
+                    ?: 0.0
+                playback.start(
+                    url = resolved.url,
+                    title = resolved.track.title,
+                    artist = listOfNotNull(
+                        resolved.track.album.takeIf { it.isNotEmpty() },
+                        resolved.track.artist.takeIf { it.isNotEmpty() },
+                    ).joinToString(" · "),
+                    artworkUrl = resolved.track.coverUrl,
+                    mediaId = resolved.track.id,
+                    durationMs = (durationSeconds * 1000).toLong(),
+                    startPositionMs = startAt,
+                ) {
                     if (request != playRequest) return@start
                     sessionTrack = resolved.track
                     sessionStartedAt = System.currentTimeMillis()
                     sessionIdentity = container.activeAccount
                     _state.update { it.copy(playing = resolved.track) }
+                    publishQueue()
                 }
             } catch (error: Exception) {
                 if (request == playRequest) {
@@ -604,11 +662,103 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     fun skipBy(deltaMs: Long) = playback.skipBy(deltaMs)
 
-    fun cycleSpeed() {
-        val speeds = listOf(1f, 1.25f, 1.5f, 2f, 0.75f)
-        val next = speeds[(speeds.indexOf(_state.value.speed).coerceAtLeast(0) + 1) % speeds.size]
-        playback.setSpeed(next)
-        _state.update { it.copy(speed = next) }
+    /** Mirrors the queue into the service so notification buttons know the bounds. */
+    private fun publishQueue() {
+        val current = _state.value
+        PlaybackQueueBridge.publish(
+            PlaybackQueueBridge.Snapshot(
+                index = current.queueIndex,
+                size = current.queue.size,
+            ),
+        )
+    }
+
+    private var lastAdvanceAt = 0L
+
+    /**
+     * Rolls onto the next episode when one finishes on its own.
+     *
+     * The trim ticker advances at the tail as well, so the first caller wins and
+     * the other one is dropped instead of skipping an episode.
+     */
+    private fun onTrackEnded() {
+        val current = _state.value
+        if (current.queue.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (now - lastAdvanceAt < 2000L) return
+        lastAdvanceAt = now
+        syncProgress()
+        if (current.queueIndex < current.queue.lastIndex) {
+            playQueue(current.queue, current.queueIndex + 1)
+        } else {
+            _state.update { it.copy(isPlaying = false) }
+        }
+    }
+
+    // ------------------------------------------------------------------ comments
+
+    /** Opens the comment sheet for whatever is playing. */
+    fun openComments() {
+        val track = _state.value.playing ?: return
+        _state.update {
+            it.copy(
+                commentsOpen = true,
+                comments = emptyList(),
+                commentsPage = 0,
+                commentsTotal = 0,
+                commentsHasMore = false,
+                commentsError = null,
+            )
+        }
+        loadComments(track.number, 1)
+    }
+
+    fun closeComments() { _state.update { it.copy(commentsOpen = false) } }
+
+    fun loadMoreComments() {
+        val current = _state.value
+        if (current.commentsLoading || !current.commentsHasMore) return
+        val track = current.playing ?: return
+        loadComments(track.number, current.commentsPage + 1)
+    }
+
+    fun retryComments() {
+        val track = _state.value.playing ?: return
+        loadComments(track.number, 1)
+    }
+
+    private fun loadComments(number: String, page: Int) {
+        val identity = container.activeAccount
+        _state.update { it.copy(commentsLoading = true, commentsError = null) }
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    container.client(identity).trackComments(number, page)
+                }
+                _state.update { state ->
+                    state.copy(
+                        comments = if (page <= 1) result.comments else state.comments + result.comments,
+                        commentsPage = result.page,
+                        commentsTotal = result.total,
+                        commentsHasMore = result.hasMore,
+                        commentsLoading = false,
+                        commentsError = null,
+                    )
+                }
+            } catch (error: Exception) {
+                _state.update {
+                    it.copy(commentsLoading = false, commentsError = describe(error))
+                }
+            }
+        }
+    }
+
+    /** Applies a speed picked in the player sheet and remembers it. */
+    fun setSpeed(speed: Float) {
+        val value = normalizeSpeed(speed)
+        playback.setSpeed(value)
+        container.setPlaySpeed(value)
+        _state.update { it.copy(speed = value) }
     }
 
     /** [minutes] == null cancels the timer. */
@@ -646,6 +796,8 @@ class MainViewModel(private val context: Context, private val container: AppCont
     fun seekTo(positionMs: Long) = playback.seekTo(positionMs)
 
     fun stopPlayback() {
+        lastAdvanceAt = 0L
+        publishQueue()
         // Cancel any in-flight resolve so stopping cannot be undone by a late reply.
         playRequest++
         syncProgress()
@@ -1004,6 +1156,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 if (outro > 0 && duration > outro + 2000L && position >= duration - outro) {
                     // Skip the credits by rolling to the next episode.
                     if (current.queueIndex < current.queue.lastIndex) {
+                        lastAdvanceAt = System.currentTimeMillis()
                         playQueue(current.queue, current.queueIndex + 1)
                     } else {
                         playback.toggle()
