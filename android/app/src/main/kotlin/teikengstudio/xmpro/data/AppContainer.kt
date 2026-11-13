@@ -433,7 +433,7 @@ class AppContainer(context: Context) {
 
     // ---------------------------------------------------------------- playback
 
-    /** Requested audio quality: auto, m4a_128, m4a_64 or mp3_32. */
+    /** Requested audio quality: auto, m4a_128, m4a_64, mp3_64 or mp3_32. */
     fun playbackQuality(): String = store.state().optJSONObject("settings")
         ?.optJSONObject("playback")?.optString("quality")?.takeIf { it.isNotEmpty() } ?: "auto"
 
@@ -442,6 +442,23 @@ class AppContainer(context: Context) {
             val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
             val playback = settings.optJSONObject("playback") ?: org.json.JSONObject().also { settings.put("playback", it) }
             playback.put("quality", quality)
+        }
+    }
+
+    /** Sound preset id; see EffectPreset. */
+    fun effectPreset(): String = store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optString("effectPreset")?.takeIf { it.isNotEmpty() } ?: "off"
+
+    /** Preset intensity, 0..100. */
+    fun effectStrength(): Int = (store.state().optJSONObject("settings")
+        ?.optJSONObject("playback")?.optInt("effectStrength", 50) ?: 50).coerceIn(0, 100)
+
+    fun setEffect(preset: String, strength: Int) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            val playback = settings.optJSONObject("playback") ?: org.json.JSONObject().also { settings.put("playback", it) }
+            playback.put("effectPreset", preset)
+            playback.put("effectStrength", strength.coerceIn(0, 100))
         }
     }
 

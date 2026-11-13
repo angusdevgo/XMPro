@@ -11,3 +11,13 @@ fun formatListeningTime(seconds: Int): String {
         else -> "$minutes 分"
     }
 }
+
+/** Codec label for a resolved stream, e.g. m4a_128 -> "AAC 128k". */
+fun formatQuality(type: String): String = when (type.lowercase()) {
+    "m4a_128" -> "AAC 128k"
+    "m4a_64" -> "AAC 64k"
+    "m4a_24" -> "AAC 24k"
+    "mp3_64" -> "MP3 64k"
+    "mp3_32" -> "MP3 32k"
+    else -> ""
+}

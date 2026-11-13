@@ -90,6 +90,8 @@ fun PlayerSheet(
     onSkip: (Long) -> Unit,
     onSeek: (Long) -> Unit,
     onSpeedChange: (Float) -> Unit,
+    onEffect: (String) -> Unit = {},
+    onEffectStrength: (Int) -> Unit = {},
     onFavorite: () -> Unit,
     onBookmark: () -> Unit,
     isFavorite: Boolean,
@@ -114,6 +116,7 @@ fun PlayerSheet(
     var timerOpen by remember { mutableStateOf(false) }
     var trimOpen by remember { mutableStateOf(false) }
     var speedOpen by remember { mutableStateOf(false) }
+    var effectOpen by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableFloatStateOf(-1f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -123,6 +126,7 @@ fun PlayerSheet(
             timerOpen -> timerOpen = false
             trimOpen -> trimOpen = false
             speedOpen -> speedOpen = false
+            effectOpen -> effectOpen = false
             else -> onDismiss()
         }
     }
@@ -319,6 +323,37 @@ fun PlayerSheet(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(Modifier.weight(1f))
+                // One line carries both facts the user cares about here: what
+                // arrived (the tier is not always the requested one) and the
+                // current sound preset.
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable { effectOpen = true }
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val quality = formatQuality(state.playingQuality)
+                    if (quality.isNotEmpty()) {
+                        Text(
+                            quality,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        )
+                        Text(
+                            " · ",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val preset = teikengstudio.xmpro.player.EffectPreset.of(state.effectPreset)
+                    Text(
+                        if (preset == teikengstudio.xmpro.player.EffectPreset.Off) "音效" else "音效·${preset.label}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 Text(
                     formatDuration(total / 1000.0),
@@ -539,6 +574,16 @@ fun PlayerSheet(
             speed = state.speed,
             onChange = onSpeedChange,
             onDismiss = { speedOpen = false },
+        )
+    }
+
+    if (effectOpen) {
+        EffectSheet(
+            preset = state.effectPreset,
+            strength = state.effectStrength,
+            onPreset = onEffect,
+            onStrength = onEffectStrength,
+            onDismiss = { effectOpen = false },
         )
     }
 

@@ -12,6 +12,12 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 
 /**
  * Hosts the single ExoPlayer instance for the process so playback keeps running
@@ -20,6 +26,10 @@ import com.google.common.util.concurrent.ListenableFuture
 class PlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var session: MediaSession? = null
+
+    private val effects = AudioEffects()
+    private val effectScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var audioSessionId = 0
 
     private val nextCommand = SessionCommand(ACTION_NEXT, Bundle.EMPTY)
     private val previousCommand = SessionCommand(ACTION_PREVIOUS, Bundle.EMPTY)
@@ -123,6 +133,17 @@ class PlaybackService : MediaSessionService() {
             .apply {
                 setHandleAudioBecomingNoisy(true)
             }
+        // The session id only exists once an audio renderer is attached, and it
+        // changes when the output device does; both cases re-apply the preset.
+        exo.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioSessionIdChanged(eventTime: AnalyticsListener.EventTime, audioSessionId: Int) {
+                this@PlaybackService.audioSessionId = audioSessionId
+                effects.apply(audioSessionId, EffectBus.state.value)
+            }
+        })
+        effectScope.launch {
+            EffectBus.state.collect { state -> effects.apply(audioSessionId, state) }
+        }
         player = exo
         session = MediaSession.Builder(this, exo)
             .setCallback(callback)
@@ -139,6 +160,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        effectScope.cancel()
+        effects.release()
         session?.run {
             player.clearMediaItems()
             release()

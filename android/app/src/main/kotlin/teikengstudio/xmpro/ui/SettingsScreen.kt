@@ -178,6 +178,8 @@ fun SettingsScreen(
     onSyncProfile: () -> Unit,
     onRenameAccount: (String, String) -> Unit,
     onQuality: (String) -> Unit,
+    onEffect: (String) -> Unit = {},
+    onEffectStrength: (Int) -> Unit = {},
     onSkipTrim: (Boolean, Int, Int, String) -> Unit,
     onCheckUpdate: () -> Unit = {},
     onDownloadUpdate: () -> Unit = {},
@@ -265,6 +267,7 @@ fun SettingsScreen(
                                 "auto" to "自动",
                                 "m4a_128" to "高清",
                                 "m4a_64" to "标准",
+                                "mp3_64" to "省流",
                                 "mp3_32" to "流畅",
                             ),
                             selected = state.quality,
@@ -272,6 +275,44 @@ fun SettingsScreen(
                         )
                         Text(
                             "高清优先使用 AAC 128k；会员/听时权限不足时回落到可用码率。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                    SettingsGroup {
+                        GroupTitle("音效")
+                        ChoiceRow(
+                            options = teikengstudio.xmpro.player.EffectPreset.entries
+                                .map { it.id to it.label },
+                            selected = state.effectPreset,
+                            onSelect = onEffect,
+                        )
+                        if (state.effectPreset != teikengstudio.xmpro.player.EffectPreset.Off.id) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 16.dp, top = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("强度", style = MaterialTheme.typography.bodyMedium)
+                                Slider(
+                                    value = state.effectStrength / 100f,
+                                    onValueChange = { onEffectStrength((it * 100).roundToInt()) },
+                                    steps = 0,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 12.dp),
+                                )
+                                Text(
+                                    "${state.effectStrength}%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Text(
+                            "音效由系统音频效果实现，部分机型不支持某一档时会自动跳过。",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

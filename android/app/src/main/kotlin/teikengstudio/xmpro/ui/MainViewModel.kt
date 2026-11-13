@@ -33,6 +33,8 @@ import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.UpdateItem
 import teikengstudio.xmpro.model.UpdatePage
 import teikengstudio.xmpro.model.XmlyException
+import teikengstudio.xmpro.player.EffectBus
+import teikengstudio.xmpro.player.EffectPreset
 import teikengstudio.xmpro.player.PlaybackQueueBridge
 
 /** Result bundle of the four independent library requests. */
@@ -103,6 +105,12 @@ data class UiState(
     /** Trim points as per-thousand of each track, so they fit any episode length. */
     /** App-level playback volume, 0..1. */
     val playVolume: Float = 1f,
+    /** Sound preset id, see EffectPreset. */
+    val effectPreset: String = "off",
+    /** Preset intensity, 0..100. */
+    val effectStrength: Int = 50,
+    /** Bitrate the current stream actually resolved to, e.g. m4a_128. */
+    val playingQuality: String = "",
     /** About page: mirror choice and the update probe result. */
     val updateMirror: String = "",
     val updateChecking: Boolean = false,
@@ -227,6 +235,8 @@ class MainViewModel(private val context: Context, private val container: AppCont
             quality = container.playbackQuality(),
             playVolume = container.playVolume(),
             speed = normalizeSpeed(container.playSpeed()),
+            effectPreset = container.effectPreset(),
+            effectStrength = container.effectStrength(),
             updateMirror = container.updateMirror(),
             autoCheckUpdate = container.autoCheckUpdate(),
             skipTrimEnabled = container.skipTrimEnabled(),
@@ -250,6 +260,11 @@ class MainViewModel(private val context: Context, private val container: AppCont
     val positionMs: StateFlow<Long> = _position.asStateFlow()
 
     init {
+        // Hand the stored preset to the service before anything plays.
+        EffectBus.publish(
+            EffectPreset.of(container.effectPreset()),
+            container.effectStrength(),
+        )
         // The service owns the player; mirror its state into the UI model.
         viewModelScope.launch {
             playback.error.collect { failure ->
@@ -635,7 +650,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     sessionTrack = resolved.track
                     sessionStartedAt = System.currentTimeMillis()
                     sessionIdentity = container.activeAccount
-                    _state.update { it.copy(playing = resolved.track) }
+                    _state.update { it.copy(playing = resolved.track, playingQuality = resolved.actualQuality) }
                     publishQueue()
                     // Record the switch immediately: leaving the app straight
                     // after picking another episode must still move the cloud
@@ -815,6 +830,23 @@ class MainViewModel(private val context: Context, private val container: AppCont
         playback.setSpeed(value)
         container.setPlaySpeed(value)
         _state.update { it.copy(speed = value) }
+    }
+
+    /** Switches the sound preset; the service listens on [EffectBus]. */
+    fun setEffect(preset: String) {
+        val resolved = EffectPreset.of(preset)
+        val strength = _state.value.effectStrength
+        container.setEffect(resolved.id, strength)
+        EffectBus.publish(resolved, strength)
+        _state.update { it.copy(effectPreset = resolved.id) }
+    }
+
+    fun setEffectStrength(strength: Int) {
+        val value = strength.coerceIn(0, 100)
+        val preset = EffectPreset.of(_state.value.effectPreset)
+        container.setEffect(preset.id, value)
+        EffectBus.publish(preset, value)
+        _state.update { it.copy(effectStrength = value) }
     }
 
     /**
