@@ -183,6 +183,7 @@ fun SettingsScreen(
     onDownloadUpdate: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
     onMirror: (String) -> Unit = {},
+    onAutoCheckUpdate: (Boolean) -> Unit = {},
     onOpenLink: (String) -> Unit = {},
     onDismissUpdate: () -> Unit = {},
     onDynamicColor: (Boolean) -> Unit,
@@ -412,6 +413,7 @@ fun SettingsScreen(
                     onDownloadUpdate = onDownloadUpdate,
                     onInstallUpdate = onInstallUpdate,
                     onMirror = onMirror,
+                    onAutoCheckUpdate = onAutoCheckUpdate,
                     onOpenLink = onOpenLink,
                     onDismissResult = onDismissUpdate,
                 )
@@ -1837,6 +1839,7 @@ private fun AboutPage(
     onDownloadUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
     onMirror: (String) -> Unit,
+    onAutoCheckUpdate: (Boolean) -> Unit,
     onOpenLink: (String) -> Unit,
     onDismissResult: () -> Unit,
 ) {
@@ -1892,6 +1895,13 @@ private fun AboutPage(
 
         GroupTitle("信息")
         SettingsGroup {
+            SettingSwitchRow(
+                title = "自动检查更新",
+                subtitle = "启动时最多每 12 小时检测一次，发现新版本会弹窗提示",
+                checked = state.autoCheckUpdate,
+                onCheckedChange = onAutoCheckUpdate,
+            )
+            GroupDivider()
             SettingsRow(
                 title = "检查更新",
                 subtitle = if (state.updateChecking) "正在连接 GitHub…" else "连接官方仓库获取最新版本",

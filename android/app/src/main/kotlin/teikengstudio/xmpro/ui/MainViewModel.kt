@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,15 +22,26 @@ import teikengstudio.xmpro.data.AccountSummary
 import teikengstudio.xmpro.data.AppContainer
 import teikengstudio.xmpro.model.Album
 import teikengstudio.xmpro.model.AlbumPage
+import teikengstudio.xmpro.model.FavoritePage
 import teikengstudio.xmpro.model.HistoryRecord
 import teikengstudio.xmpro.model.HomeChannel
 import teikengstudio.xmpro.model.HomeSection
 import teikengstudio.xmpro.model.HomeTab
 import teikengstudio.xmpro.model.SubscriptionItem
+import teikengstudio.xmpro.model.SubscriptionPage
 import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.UpdateItem
+import teikengstudio.xmpro.model.UpdatePage
 import teikengstudio.xmpro.model.XmlyException
 import teikengstudio.xmpro.player.PlaybackQueueBridge
+
+/** Result bundle of the four independent library requests. */
+private data class ListeningLoad(
+    val subscriptions: Result<SubscriptionPage>,
+    val updates: Result<UpdatePage>,
+    val history: Result<List<HistoryRecord>>,
+    val favorites: Result<FavoritePage>,
+)
 
 data class UiState(
     val signedIn: Boolean = false,
@@ -49,7 +62,6 @@ data class UiState(
     val playing: Track? = null,
     val playingTitle: String? = null,
     val isPlaying: Boolean = false,
-    val positionMs: Long = 0,
     val durationMs: Long = 0,
     val message: String? = null,
     val channels: List<HomeChannel> = emptyList(),
@@ -106,6 +118,8 @@ data class UiState(
     val updatePromptTag: String? = null,
     /** Release notes with markdown markers stripped, for the dialog body. */
     val updateNotes: String? = null,
+    /** About page switch: probe for a new release on start-up. */
+    val autoCheckUpdate: Boolean = true,
     val skipTrimEnabled: Boolean = false,
     val skipTrimMode: String = teikengstudio.xmpro.player.SmartSkip.MODE_SMART,
     val introSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
@@ -214,6 +228,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
             playVolume = container.playVolume(),
             speed = normalizeSpeed(container.playSpeed()),
             updateMirror = container.updateMirror(),
+            autoCheckUpdate = container.autoCheckUpdate(),
             skipTrimEnabled = container.skipTrimEnabled(),
             skipTrimMode = container.skipTrimMode(),
             introSkipPermille = container.introSkipPermille(),
@@ -223,6 +238,16 @@ class MainViewModel(private val context: Context, private val container: AppCont
         ),
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
+
+    /**
+     * Playback position, published at the tick rate.
+     *
+     * It sits outside [UiState] on purpose: the ticker runs twice a second while
+     * audio plays, and copying the whole UI state that often invalidated every
+     * screen that receives it, including the home feed.
+     */
+    private val _position = MutableStateFlow(0L)
+    val positionMs: StateFlow<Long> = _position.asStateFlow()
 
     init {
         // The service owns the player; mirror its state into the UI model.
@@ -237,10 +262,10 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     it.copy(
                         playingTitle = player.title,
                         isPlaying = player.playing,
-                        positionMs = player.positionMs,
                         durationMs = player.durationMs,
                     )
                 }
+                publishPosition()
                 if (player.playing) startTicker() else ticker?.cancel()
             }
         }
@@ -261,6 +286,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
         // Silent, at most once a day: the shell turns a hit into a dialog.
         viewModelScope.launch {
             delay(2500)
+            if (!container.autoCheckUpdate()) return@launch
             val last = container.updateCheckedAt()
             if (System.currentTimeMillis() - last < 12 * 60 * 60 * 1000L) return@launch
             checkUpdate(silent = true)
@@ -675,7 +701,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     fun previous() {
         val current = _state.value
-        if (current.positionMs > 5000) {
+        if (playback.currentPosition() > 5000) {
             playback.seekTo(0)
             return
         }
@@ -687,7 +713,10 @@ class MainViewModel(private val context: Context, private val container: AppCont
         playQueue(current.queue, index)
     }
 
-    fun skipBy(deltaMs: Long) = playback.skipBy(deltaMs)
+    fun skipBy(deltaMs: Long) {
+        playback.skipBy(deltaMs)
+        publishPosition()
+    }
 
     /** Mirrors the queue into the service so notification buttons know the bounds. */
     private fun publishQueue() {
@@ -851,7 +880,17 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
-    fun seekTo(positionMs: Long) = playback.seekTo(positionMs)
+    fun seekTo(positionMs: Long) {
+        playback.seekTo(positionMs)
+        // The ticker is cancelled while paused, so the bar would freeze otherwise.
+        publishPosition()
+    }
+
+    /** Current position snapshot for the progress bar. */
+    private fun publishPosition() {
+        val position = playback.currentPosition()
+        if (position != _position.value) _position.value = position
+    }
 
     fun stopPlayback() {
         lastAdvanceAt = 0L
@@ -864,6 +903,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
         sessionIdentity = null
         playback.stop()
         ticker?.cancel()
+        _position.value = 0L
         _state.update { it.copy(playing = null) }
     }
 
@@ -959,6 +999,23 @@ class MainViewModel(private val context: Context, private val container: AppCont
      * Downloads the new APK in-app and verifies its SHA-256 against the release's
      * SHA256SUMS before the installer ever sees it.
      */
+    /**
+     * Turns the start-up probe on or off.
+     *
+     * Re-enabling clears the throttle so the next launch checks right away
+     * instead of waiting out the previous window.
+     */
+    fun setAutoCheckUpdate(enabled: Boolean) {
+        container.setAutoCheckUpdate(enabled)
+        if (enabled) container.setUpdateCheckedAt(0L)
+        _state.update {
+            it.copy(
+                autoCheckUpdate = enabled,
+                message = if (enabled) "已开启自动检查更新" else "已关闭自动检查更新",
+            )
+        }
+    }
+
     fun dismissUpdatePrompt() =
         _state.update { it.copy(updatePrompt = false, updatePromptTag = null) }
 
@@ -1233,7 +1290,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
             var sinceSync = 0
             while (isActive) {
                 val position = playback.currentPosition()
-                _state.update { it.copy(positionMs = position) }
+                if (position != _position.value) _position.value = position
                 val current = _state.value
                 val duration = current.durationMs
                 val manual = current.skipTrimEnabled &&
@@ -1267,39 +1324,45 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
         _state.update { it.copy(listeningLoading = true, listeningError = null) }
         viewModelScope.launch {
-            val identity = container.activeAccount ?: return@launch
+            val identity = container.activeAccount
+            if (identity == null) {
+                // Without this the spinner stays up for ever on a half-signed-in state.
+                _state.update { it.copy(listeningLoading = false, listeningError = "登录信息已失效") }
+                return@launch
+            }
             val experience = XmlyExperience(container.client(identity))
-            var failure: String? = null
-            runCatching { withContext(Dispatchers.IO) { experience.subscriptions(1) } }
-                .onSuccess { page ->
-                    _state.update {
-                        it.copy(subscriptions = page.items, moreSubscriptions = page.hasMore, subscriptionPage = 1)
-                    }
-                }
-                .onFailure { failure = describe(it) }
-            runCatching { withContext(Dispatchers.IO) { experience.updates() } }
-                .onSuccess { page ->
-                    _state.update {
-                        it.copy(updates = page.items, moreUpdates = page.hasMore, nextTimeline = page.nextTimeline)
-                    }
-                }
-                .onFailure { failure = failure ?: describe(it) }
-            runCatching { withContext(Dispatchers.IO) { XmlyHistory(container.client(identity)).records() } }
-                .onSuccess { records -> _state.update { it.copy(history = records) } }
-                .onFailure { failure = failure ?: describe(it) }
-            runCatching { withContext(Dispatchers.IO) { experience.favorites(1) } }
-                .onSuccess { page ->
-                    _state.update {
-                        it.copy(
-                            favorites = page.items,
-                            moreFavorites = page.hasMore,
-                            favoritePage = 1,
-                            favoriteIds = page.items.map { track -> track.id }.toSet(),
-                        )
-                    }
-                }
-                .onFailure { failure = failure ?: describe(it) }
-            _state.update { it.copy(listeningLoading = false, listeningError = failure) }
+            val historyClient = XmlyHistory(container.client(identity))
+            // The four sections are independent, so they share one round trip
+            // window instead of queueing behind each other.
+            val (subscriptions, updates, records, favorites) = coroutineScope {
+                val subs = async(Dispatchers.IO) { runCatching { experience.subscriptions(1) } }
+                val feed = async(Dispatchers.IO) { runCatching { experience.updates() } }
+                val history = async(Dispatchers.IO) { runCatching { historyClient.records() } }
+                val favs = async(Dispatchers.IO) { runCatching { experience.favorites(1) } }
+                ListeningLoad(subs.await(), feed.await(), history.await(), favs.await())
+            }
+            val failure = subscriptions.exceptionOrNull()
+                ?: updates.exceptionOrNull()
+                ?: records.exceptionOrNull()
+                ?: favorites.exceptionOrNull()
+            _state.update { state ->
+                state.copy(
+                    subscriptions = subscriptions.getOrNull()?.items ?: state.subscriptions,
+                    moreSubscriptions = subscriptions.getOrNull()?.hasMore ?: state.moreSubscriptions,
+                    subscriptionPage = if (subscriptions.isSuccess) 1 else state.subscriptionPage,
+                    updates = updates.getOrNull()?.items ?: state.updates,
+                    moreUpdates = updates.getOrNull()?.hasMore ?: state.moreUpdates,
+                    nextTimeline = updates.getOrNull()?.nextTimeline ?: state.nextTimeline,
+                    history = records.getOrNull() ?: state.history,
+                    favorites = favorites.getOrNull()?.items ?: state.favorites,
+                    moreFavorites = favorites.getOrNull()?.hasMore ?: state.moreFavorites,
+                    favoritePage = if (favorites.isSuccess) 1 else state.favoritePage,
+                    favoriteIds = favorites.getOrNull()?.items?.map { track -> track.id }?.toSet()
+                        ?: state.favoriteIds,
+                    listeningLoading = false,
+                    listeningError = failure?.let(::describe),
+                )
+            }
         }
     }
 

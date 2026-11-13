@@ -252,6 +252,7 @@ fun ShellScreen(
                         onDownloadUpdate = viewModel::downloadUpdate,
                         onInstallUpdate = viewModel::installUpdate,
                         onMirror = viewModel::setUpdateMirror,
+                        onAutoCheckUpdate = viewModel::setAutoCheckUpdate,
                         onOpenLink = viewModel::openLink,
                         onDismissUpdate = viewModel::clearUpdateResult,
                         onDynamicColor = viewModel::setDynamicColor,
@@ -354,6 +355,7 @@ fun ShellScreen(
             ) {
                 PlayerSheet(
                     state = state,
+                    positionMs = viewModel.positionMs,
                     onDismiss = { playerOpen = false },
                     onToggle = viewModel::togglePlayback,
                     onStop = {
@@ -405,6 +407,7 @@ fun ShellScreen(
         ) {
             if (playerVisible) PlayerBar(
                 state = state,
+                positionMs = viewModel.positionMs,
                 onToggle = viewModel::togglePlayback,
                 onStop = viewModel::stopPlayback,
                 onOpenPlayer = { if (state.playingTitle != null) playerOpen = true },

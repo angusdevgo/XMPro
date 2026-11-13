@@ -31,7 +31,8 @@ class XmlyClient(
     private val http: XmlyHttp = XmlyHttp(),
     val credentials: Credentials? = null,
     private val clock: () -> Instant = { Instant.ofEpochMilli(ServerClock.now()) },
-    private val mobile: String = MOBILE,
+    /** Mobile base URL; overridable so tests can point it at a local server. */
+    internal val mobile: String = MOBILE,
     private val searchOrigin: String = XmlyHttp.SEARCH_ORIGIN,
 ) : QuotaSource {
     val identity: String = credentials?.identity ?: ANONYMOUS

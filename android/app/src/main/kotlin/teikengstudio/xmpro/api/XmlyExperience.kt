@@ -217,8 +217,9 @@ class XmlyExperience(private val client: XmlyClient) {
                 updatedAt = time(row.opt("lastUpdateAt") ?: 0),
             )
         }
-        val hasMore = (data.opt("hasMore") as? Boolean) ?: (items.size >= pageSize)
-        if (hasMore && items.isEmpty()) throw invalid
+        // "More pages" on an empty page is the service contradicting itself; treat
+        // it as the end of the list instead of failing the whole screen.
+        val hasMore = ((data.opt("hasMore") as? Boolean) ?: (items.size >= pageSize)) && items.isNotEmpty()
         return SubscriptionPage(items, hasMore)
     }
 
@@ -276,8 +277,9 @@ class XmlyExperience(private val client: XmlyClient) {
         if (before != null && next != null && next >= before) {
             throw XmlyException("repeated_page", "暂时无法读取更早的更新，已保留当前列表")
         }
-        if (hasMore && (next == null || next <= 0)) throw invalid
-        return UpdatePage(items, hasMore, next)
+        // A feed with nothing new still reports hasMore, and a paging cursor the
+        // service did not return cannot be followed: both simply end the list.
+        return UpdatePage(items, hasMore && next != null && next > 0, next)
     }
 
     fun setSubscribed(albumId: String, subscribed: Boolean) {
@@ -587,7 +589,7 @@ class XmlyExperience(private val client: XmlyClient) {
 
     private fun get(path: String, query: Map<String, String>): JSONObject {
         val payload = if (client.credentials != null) {
-            client.request("GET", XmlyClient.MOBILE, path, query = query)
+            client.request("GET", client.mobile, path, query = query)
         } else {
             client.getMobile(path, query)
         }

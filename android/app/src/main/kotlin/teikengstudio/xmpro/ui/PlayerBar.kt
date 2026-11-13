@@ -21,6 +21,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,14 +39,17 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun PlayerBar(
     state: UiState,
+    positionMs: StateFlow<Long>,
     onToggle: () -> Unit,
     onStop: () -> Unit,
     onOpenPlayer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val title = state.playingTitle ?: return
+    // Collected here so the tick only redraws this card, not the whole shell.
+    val position by positionMs.collectAsState()
     val progress = if (state.durationMs > 0) {
-        (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
+        (position.toFloat() / state.durationMs).coerceIn(0f, 1f)
     } else {
         0f
     }

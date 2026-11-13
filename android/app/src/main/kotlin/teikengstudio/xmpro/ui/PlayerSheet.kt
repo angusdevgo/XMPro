@@ -52,6 +52,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -79,6 +81,7 @@ import teikengstudio.xmpro.ui.theme.ThemedContent
 @Composable
 fun PlayerSheet(
     state: UiState,
+    positionMs: StateFlow<Long>,
     onDismiss: () -> Unit,
     onToggle: () -> Unit,
     onStop: () -> Unit,
@@ -292,7 +295,8 @@ fun PlayerSheet(
             }
 
             val total = state.durationMs.coerceAtLeast(0)
-            val shown = if (dragPosition >= 0f) dragPosition.toLong() else state.positionMs
+            val livePosition by positionMs.collectAsState()
+            val shown = if (dragPosition >= 0f) dragPosition.toLong() else livePosition
             Slider(
                 value = if (total > 0) (shown.toFloat() / total).coerceIn(0f, 1f) else 0f,
                 onValueChange = { value ->

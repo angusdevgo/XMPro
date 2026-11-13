@@ -476,6 +476,17 @@ class AppContainer(context: Context) {
         }
     }
 
+    /** Whether the app probes for a new release on start-up. */
+    fun autoCheckUpdate(): Boolean = store.state().optJSONObject("settings")
+        ?.optBoolean("autoCheckUpdate", true) ?: true
+
+    fun setAutoCheckUpdate(enabled: Boolean) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            settings.put("autoCheckUpdate", enabled)
+        }
+    }
+
     /** Last automatic update check, used to keep it to once per day. */
     fun updateCheckedAt(): Long = store.state().optJSONObject("settings")
         ?.optLong("updateCheckedAt", 0L) ?: 0L
