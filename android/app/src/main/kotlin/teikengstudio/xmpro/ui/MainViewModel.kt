@@ -961,7 +961,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 withContext(Dispatchers.IO) { teikengstudio.xmpro.updater.Updater.latest(current, mirror) }
             }
             val release = outcome.getOrNull()
-            container.setUpdateCheckedAt(System.currentTimeMillis())
+            // A network failure must not burn the window, otherwise one bad
+            // launch hides every later release for half a day.
+            if (outcome.isSuccess) container.setUpdateCheckedAt(System.currentTimeMillis())
             _state.update {
                 it.copy(
                     updateChecking = false,
@@ -971,6 +973,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                             "发现新版本 ${release.tag}" + suffix
                         }
 
+                        outcome.isSuccess -> "已是最新版本"
                         // A silent check never reports its own failure.
                         silent -> it.updateResult
                         else -> outcome.exceptionOrNull()?.message ?: "检查失败"

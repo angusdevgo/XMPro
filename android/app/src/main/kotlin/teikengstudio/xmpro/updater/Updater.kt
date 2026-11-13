@@ -59,7 +59,7 @@ object Updater {
      * so proxying `api.github.com` through them just times out. [mirror] is
      * applied to the APK link instead.
      */
-    fun latest(current: String, mirror: String): Release {
+    fun latest(current: String, mirror: String): Release? {
         val connection = (URL(LATEST).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 15_000
@@ -74,8 +74,9 @@ object Updater {
             val payload = JSONObject(body)
             val tag = payload.optString("tag_name").trim()
             if (tag.isEmpty()) error("更新信息无效")
-            val newer = compare(tag.removePrefix("v"), current.removePrefix("v")) > 0
-            if (!newer) error("已是最新版本")
+            // Up to date is a valid answer, not a failure: the caller decides
+            // how to say it, and only a real answer may consume the throttle.
+            if (compare(tag.removePrefix("v"), current.removePrefix("v")) <= 0) return null
             val assets = payload.optJSONArray("assets")
             var apk: String? = null
             var apkName = ""
