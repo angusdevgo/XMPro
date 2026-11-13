@@ -321,6 +321,18 @@ fun ShellScreen(
             }
         }
 
+        if (state.updatePrompt) {
+            UpdatePromptDialog(
+                tag = state.updatePromptTag ?: "新版本",
+                progress = state.updateProgress,
+                ready = state.updateReady,
+                notes = state.updateNotes,
+                onDownload = viewModel::downloadUpdate,
+                onInstall = viewModel::installUpdate,
+                onDismiss = viewModel::dismissUpdatePrompt,
+            )
+        }
+
         SnackbarHost(
             hostState = snackbar,
             modifier = Modifier

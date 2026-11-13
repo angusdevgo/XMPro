@@ -476,6 +476,17 @@ class AppContainer(context: Context) {
         }
     }
 
+    /** Last automatic update check, used to keep it to once per day. */
+    fun updateCheckedAt(): Long = store.state().optJSONObject("settings")
+        ?.optLong("updateCheckedAt", 0L) ?: 0L
+
+    fun setUpdateCheckedAt(at: Long) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings") ?: org.json.JSONObject().also { state.put("settings", it) }
+            settings.put("updateCheckedAt", at)
+        }
+    }
+
     /** GitHub mirror prefix used by the update check; empty means direct. */
     fun updateMirror(): String = store.state().optJSONObject("settings")
         ?.optString("updateMirror") ?: ""

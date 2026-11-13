@@ -100,6 +100,12 @@ data class UiState(
     val updateProgress: Int = -1,
     /** True once the APK is downloaded and waiting for the installer. */
     val updateReady: Boolean = false,
+    /** A newer release was found on start-up; the shell offers it as a dialog. */
+    val updatePrompt: Boolean = false,
+    /** Version label shown in that dialog. */
+    val updatePromptTag: String? = null,
+    /** Release notes with markdown markers stripped, for the dialog body. */
+    val updateNotes: String? = null,
     val skipTrimEnabled: Boolean = false,
     val skipTrimMode: String = teikengstudio.xmpro.player.SmartSkip.MODE_SMART,
     val introSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
@@ -154,6 +160,23 @@ fun normalizeSpeed(raw: Float): Float {
     val snapped = kotlin.math.round(clamped / SPEED_STEP) * SPEED_STEP
     return snapped.coerceIn(MIN_SPEED, MAX_SPEED)
 }
+
+/**
+ * Turns a release body into plain lines: heading markers and bullet dashes
+ * read badly inside a dialog.
+ */
+internal fun formatReleaseNotes(notes: String): String = notes
+    .lineSequence()
+    .map { line ->
+        when {
+            line.startsWith("#") -> ""
+            line.startsWith("- ") || line.startsWith("* ") -> "· " + line.drop(2)
+            else -> line.trim()
+        }
+    }
+    .filter { it.isNotEmpty() }
+    .joinToString("\n")
+    .trim()
 
 class MainViewModel(private val context: Context, private val container: AppContainer) : ViewModel() {
     private var ticker: Job? = null
@@ -235,6 +258,13 @@ class MainViewModel(private val context: Context, private val container: AppCont
         // next episode instead of stopping silently.
         viewModelScope.launch { playback.ended.collect { onTrackEnded() } }
         viewModelScope.launch { autoClaimLoop() }
+        // Silent, at most once a day: the shell turns a hit into a dialog.
+        viewModelScope.launch {
+            delay(2500)
+            val last = container.updateCheckedAt()
+            if (System.currentTimeMillis() - last < 12 * 60 * 60 * 1000L) return@launch
+            checkUpdate(silent = true)
+        }
         if (initialAccounts.isNotEmpty()) syncProfiles()
     }
 
@@ -873,9 +903,15 @@ class MainViewModel(private val context: Context, private val container: AppCont
     }
 
     /** Probes the project's GitHub releases for a newer build. */
-    fun checkUpdate() {
+    /**
+     * Looks for a newer release.
+     *
+     * @param silent automatic check on start-up: no busy indicator, and a
+     * failure stays invisible instead of reporting a network problem.
+     */
+    fun checkUpdate(silent: Boolean = false) {
         if (_state.value.updateChecking) return
-        _state.update { it.copy(updateChecking = true, updateResult = null, updateUrl = null) }
+        if (!silent) _state.update { it.copy(updateChecking = true, updateResult = null, updateUrl = null) }
         val mirror = _state.value.updateMirror
         val current = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
@@ -885,16 +921,26 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 withContext(Dispatchers.IO) { teikengstudio.xmpro.updater.Updater.latest(current, mirror) }
             }
             val release = outcome.getOrNull()
+            container.setUpdateCheckedAt(System.currentTimeMillis())
             _state.update {
                 it.copy(
                     updateChecking = false,
-                    updateResult = release?.let { found ->
-                        val suffix = if (found.notes.isBlank()) "" else "\n\n" + found.notes
-                        "发现新版本 ${found.tag}" + suffix
-                    } ?: (outcome.exceptionOrNull()?.message ?: "检查失败"),
+                    updateResult = when {
+                        release != null -> {
+                            val suffix = if (release.notes.isBlank()) "" else "\n\n" + release.notes
+                            "发现新版本 ${release.tag}" + suffix
+                        }
+
+                        // A silent check never reports its own failure.
+                        silent -> it.updateResult
+                        else -> outcome.exceptionOrNull()?.message ?: "检查失败"
+                    },
                     updateUrl = release?.apkUrl ?: release?.pageUrl,
                     updateProgress = -1,
                     updateReady = false,
+                    updatePrompt = release != null,
+                    updatePromptTag = release?.tag,
+                    updateNotes = release?.notes?.let(::formatReleaseNotes),
                 )
             }
             pendingRelease = release
@@ -913,6 +959,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
      * Downloads the new APK in-app and verifies its SHA-256 against the release's
      * SHA256SUMS before the installer ever sees it.
      */
+    fun dismissUpdatePrompt() =
+        _state.update { it.copy(updatePrompt = false, updatePromptTag = null) }
+
     fun downloadUpdate() {
         val release = pendingRelease ?: return
         val url = release.apkUrl ?: return
@@ -1342,20 +1391,62 @@ class MainViewModel(private val context: Context, private val container: AppCont
     }
 
     fun setSubscribed(albumId: String, subscribed: Boolean) {
+        val open = _state.value.album?.album?.takeIf { it.id == albumId }
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     val identity = container.activeAccount ?: throw XmlyException("login_required", "请先登录")
                     XmlyExperience(container.client(identity)).setSubscribed(albumId, subscribed)
                 }
-                _state.update {
-                    it.copy(
-                        subscriptions = if (subscribed) it.subscriptions else it.subscriptions.filterNot { row -> row.album.id == albumId },
+                // Subscribing used to leave the list untouched, so the album page
+                // kept reading "not subscribed" until the whole app reloaded.
+                _state.update { state ->
+                    val rows = if (subscribed) {
+                        if (state.subscriptions.any { it.album.id == albumId }) {
+                            state.subscriptions
+                        } else {
+                            listOf(
+                                SubscriptionItem(
+                                    album = open ?: Album(rawId = albumId),
+                                    latestTitle = "",
+                                    unreadCount = 0,
+                                    updatedAt = System.currentTimeMillis(),
+                                ),
+                            ) + state.subscriptions
+                        }
+                    } else {
+                        state.subscriptions.filterNot { it.album.id == albumId }
+                    }
+                    state.copy(
+                        subscriptions = rows,
                         message = if (subscribed) "已订阅" else "已取消订阅",
                     )
                 }
+                refreshSubscriptions(if (subscribed) open else null)
             } catch (error: Exception) {
                 _state.update { it.copy(message = describe(error)) }
+            }
+        }
+    }
+
+    /**
+     * Re-reads the first subscription page so the optimistic row is replaced.
+     *
+     * [keep] survives the merge: a new subscription can fall outside the first
+     * page, and dropping it there would flip the album back to "not subscribed".
+     */
+    private suspend fun refreshSubscriptions(keep: Album? = null) {
+        val identity = container.activeAccount ?: return
+        runCatching {
+            withContext(Dispatchers.IO) { XmlyExperience(container.client(identity)).subscriptions(1) }
+        }.onSuccess { page ->
+            val items = if (keep != null && page.items.none { it.album.id == keep.id }) {
+                listOf(SubscriptionItem(keep, "", 0, System.currentTimeMillis())) + page.items
+            } else {
+                page.items
+            }
+            _state.update {
+                it.copy(subscriptions = items, moreSubscriptions = page.hasMore, subscriptionPage = 1)
             }
         }
     }

@@ -40,6 +40,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Info
@@ -91,6 +92,66 @@ import teikengstudio.xmpro.data.AccountSummary
 import teikengstudio.xmpro.ui.theme.SeedPresets
 
 private enum class SettingsPage { Root, Account, Playback, Appearance, Backup, About }
+
+/**
+ * Start-up update offer: download in place, then hand over to the installer.
+ *
+ * The same download path as the about page is used, so the SHA-256 check and the
+ * progress reporting stay in one place.
+ */
+@Composable
+fun UpdatePromptDialog(
+    tag: String,
+    progress: Int,
+    ready: Boolean,
+    notes: String?,
+    onDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val downloading = progress in 0..99 && !ready
+    AlertDialog(
+        onDismissRequest = { if (!downloading) onDismiss() },
+        icon = { Icon(Icons.Filled.SystemUpdate, contentDescription = null) },
+        title = { Text("发现新版本 $tag") },
+        text = {
+            Column {
+                Text(
+                    when {
+                        ready -> "安装包已下载并通过校验。"
+                        downloading -> "正在下载安装包…"
+                        else -> notes?.takeIf { it.isNotBlank() } ?: "可以下载并安装这个版本。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (downloading) {
+                    LinearProgressIndicator(
+                        progress = { (progress.coerceAtLeast(0) / 100f) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    )
+                    Text(
+                        if (progress < 0) "下载中…" else "$progress%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                ready -> TextButton(onClick = onInstall) { Text("安装") }
+                downloading -> TextButton(onClick = {}, enabled = false) { Text("下载中") }
+                else -> TextButton(onClick = onDownload) { Text("立即更新") }
+            }
+        },
+        dismissButton = {
+            if (!ready) {
+                TextButton(onClick = onDismiss, enabled = !downloading) { Text("稍后") }
+            }
+        },
+    )
+}
 
 /**
  * "我的" tab: the personal summary on top, then one page per topic. Every page
