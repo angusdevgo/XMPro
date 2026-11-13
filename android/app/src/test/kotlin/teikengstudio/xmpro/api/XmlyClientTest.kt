@@ -73,7 +73,13 @@ class XmlyClientTest {
             assertFailsWith<XmlyException> { client().album("998", pageSize = 1) }.code,
         )
 
+        // A stale totalCount makes the last page short; that is not corruption.
         server.enqueue(MockResponse().setBody(albumPage(total = 5, pageSize = 5, list = """[{"trackId":101,"orderNo":1,"albumId":998}]""")))
+        server.enqueue(MockResponse().setBody("""{"ret":0,"data":{"albumId":998}}"""))
+        assertEquals(1, client().album("998", pageSize = 5).tracks.size)
+
+        // An entirely empty page where rows were promised is still an error.
+        server.enqueue(MockResponse().setBody(albumPage(total = 5, pageSize = 5, list = "[]")))
         assertEquals(
             "incomplete_catalogue",
             assertFailsWith<XmlyException> { client().album("998", pageSize = 5) }.code,
@@ -87,16 +93,18 @@ class XmlyClientTest {
     }
 
     @Test
-    fun `album rejects conflicting order numbers`() {
+    fun `album keeps the service order when ordinals disagree`() {
+        // Subscribed podcasts hit exactly this: orderNo and orderNum disagree, or
+        // the sequence is not monotonic. The page must still render.
         val list = """[
-            {"trackId":101,"orderNo":2,"albumId":998},
-            {"trackId":102,"orderNo":1,"albumId":998}
+            {"trackId":101,"orderNo":2,"orderNum":7,"albumId":998},
+            {"trackId":102,"orderNo":1,"albumId":998},
+            {"trackId":103,"orderNum":5,"albumId":998}
         ]"""
-        server.enqueue(MockResponse().setBody(albumPage(total = 2, pageSize = 2, list = list)))
-        assertEquals(
-            "invalid_catalogue",
-            assertFailsWith<XmlyException> { client().album("998", pageSize = 2) }.code,
-        )
+        server.enqueue(MockResponse().setBody(albumPage(total = 3, pageSize = 3, list = list)))
+        val page = client().album("998", pageSize = 3)
+        assertEquals(listOf("101", "102", "103"), page.tracks.map { it.number })
+        assertEquals(listOf(1, 2, 3), page.tracks.map { it.raw["officialPosition"] })
     }
 
     @Test

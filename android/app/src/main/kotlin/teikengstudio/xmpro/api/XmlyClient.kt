@@ -221,7 +221,9 @@ class XmlyClient(
             throw XmlyException("invalid_catalogue", "专辑分页无效")
         }
         val expected = (total - (page - 1) * pageSize).coerceIn(0, pageSize)
-        if (list.length() > pageSize || list.length() != expected) {
+        // A stale totalCount makes the last page shorter than arithmetic says,
+        // so only an oversized or entirely empty page is treated as broken.
+        if (list.length() > pageSize || (list.length() == 0 && expected > 0)) {
             throw XmlyException("incomplete_catalogue", "专辑分页不完整，请刷新重试")
         }
         payload.optJSONObject("album")?.opt("albumId")?.let {
@@ -233,7 +235,6 @@ class XmlyClient(
             if (xmlyIdentifier(it.toString()) != number) throw XmlyException("id_mismatch", "专辑信息不匹配")
         }
         val seen = mutableSetOf<String>()
-        var previousOrder: Int? = null
         val tracks = mutableListOf<Track>()
         for (index in 0 until list.length()) {
             val raw = list.optJSONObject(index) as? JSONObject
@@ -247,12 +248,8 @@ class XmlyClient(
             }
             val id = xmlyIdentifier((map["trackId"] ?: map["id"] ?: "").toString())
             if (!seen.add(id)) throw XmlyException("duplicate_page", "专辑声音重复，请刷新重试")
-            val order = albumOrder(map)
-            if (order != null) {
-                val monotonic = previousOrder?.let { if (ascending) order > it else order < it } ?: true
-                if (!monotonic) throw XmlyException("invalid_catalogue", "专辑声音序号冲突")
-                previousOrder = order
-            }
+            // The ordinal is display metadata only; the service order rules.
+            albumOrder(map)
             val position = (page - 1) * pageSize + index + 1
             val official = if (ascending) position else if (total > 0) total - position + 1 else null
             trackFromApi(map, albumId = number, officialPosition = official)?.let(tracks::add)
@@ -644,14 +641,19 @@ class XmlyClient(
         return number.toInt()
     }
 
+    /**
+     * Episode ordinal as reported by the service.
+     *
+     * Different endpoints spell the field differently and some podcasts return
+     * disagreeing values for the same episode. Taking the first present field
+     * keeps the page usable; the alternative was failing the whole album with an
+     * error banner, which is what subscribed shows used to hit.
+     */
     private fun albumOrder(raw: Map<String, Any?>): Int? {
-        var order: Int? = null
         for (key in listOf("orderNo", "orderNum", "order_no")) {
-            val value = xmlyPositive(raw[key]) ?: continue
-            if (order != null && order != value) throw XmlyException("invalid_catalogue", "专辑声音序号冲突")
-            order = value
+            xmlyPositive(raw[key])?.let { return it }
         }
-        return order
+        return null
     }
 
     private fun albumFromApi(raw: Map<String, Any?>, id: String, total: Int = 0): Album = Album(
