@@ -1341,10 +1341,15 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 val favs = async(Dispatchers.IO) { runCatching { experience.favorites(1) } }
                 ListeningLoad(subs.await(), feed.await(), history.await(), favs.await())
             }
-            val failure = subscriptions.exceptionOrNull()
-                ?: updates.exceptionOrNull()
-                ?: records.exceptionOrNull()
-                ?: favorites.exceptionOrNull()
+            // Naming the section makes a failure actionable instead of a bare
+            // "首页数据无效" over a screen that mostly loaded.
+            val failure = listOf(
+                "订阅" to subscriptions,
+                "更新" to updates,
+                "历史" to records,
+                "收藏" to favorites,
+            ).firstOrNull { it.second.isFailure }
+                ?.let { (label, result) -> "${label}加载失败：${describe(result.exceptionOrNull()!!)}" }
             _state.update { state ->
                 state.copy(
                     subscriptions = subscriptions.getOrNull()?.items ?: state.subscriptions,
@@ -1360,7 +1365,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     favoriteIds = favorites.getOrNull()?.items?.map { track -> track.id }?.toSet()
                         ?: state.favoriteIds,
                     listeningLoading = false,
-                    listeningError = failure?.let(::describe),
+                    listeningError = failure,
                 )
             }
         }

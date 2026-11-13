@@ -205,7 +205,10 @@ class XmlyExperience(private val client: XmlyClient) {
             mapOf("pageId" to page.toString(), "sign" to "2", "size" to pageSize.toString()),
         )
         val seen = mutableSetOf<String>()
-        val items = rows(data.opt("albumResults")).take(pageSize).map { row ->
+        // One odd row must not cost the user the whole shelf: skip it and keep
+        // the rest, the same way the album page tolerates messy metadata.
+        val items = rows(data.opt("albumResults")).take(pageSize).mapNotNull { row ->
+            if (text(row.opt("albumId")).isEmpty()) return@mapNotNull null
             val album = subscriptionAlbum(row)
             if (!seen.add(album.id)) {
                 throw XmlyException("repeated_page", "订阅列表重复，请刷新后重试")
@@ -213,7 +216,7 @@ class XmlyExperience(private val client: XmlyClient) {
             SubscriptionItem(
                 album = album,
                 latestTitle = text(row.opt("trackTitle")),
-                unreadCount = integer(row.opt("unreadNum")) ?: throw invalid,
+                unreadCount = integer(row.opt("unreadNum")) ?: 0,
                 updatedAt = time(row.opt("lastUpdateAt") ?: 0),
             )
         }
@@ -232,22 +235,21 @@ class XmlyExperience(private val client: XmlyClient) {
             mapOf("pageId" to page.toString(), "pageSize" to pageSize.toString()),
         )
         val maxPage = integer(data.opt("maxPageId")) ?: 0
-        val echoedPage = integer(data.opt("pageId")) ?: 0
-        val echoedSize = integer(data.opt("pageSize")) ?: 0
-        if (echoedPage > 0 && echoedPage != page) throw invalid
-        if (echoedSize > 0 && echoedSize != pageSize) throw invalid
         val seen = mutableSetOf<String>()
+        // The catalogue mixes sounds with other resource types and the paging
+        // echo is not authoritative: skip what cannot be shown instead of
+        // failing the whole tab over one odd row.
         val items = rows(data.opt("dataList")).take(pageSize).mapNotNull { row ->
-            if (integer(row.opt("resourceType")) != 1) throw invalid
+            if (integer(row.opt("resourceType")) != 1) return@mapNotNull null
+            if (text(row.opt("trackId")).ifEmpty { text(row.opt("id")) }.isEmpty()) return@mapNotNull null
             val track = track(row)
-            if (track.albumKey.isEmpty()) throw invalid
+            if (track.albumKey.isEmpty()) return@mapNotNull null
             if (!seen.add(track.id)) {
                 throw XmlyException("repeated_page", "收藏列表重复，请刷新后重试")
             }
             track
         }
-        val hasMore = page < maxPage
-        if ((hasMore && items.isEmpty()) || (items.isNotEmpty() && page > maxPage)) throw invalid
+        val hasMore = maxPage > 0 && page < maxPage && items.isNotEmpty()
         return FavoritePage(items, hasMore)
     }
 
@@ -261,16 +263,17 @@ class XmlyExperience(private val client: XmlyClient) {
         val data = get("/track-feed/v1/track-feed/dynamic/ts-${stamp()}", query)
         val seen = mutableSetOf<String>()
         var cursor: Long? = null
-        val items = rows(data.opt("trackResults")).take(pageSize).map { row ->
+        val items = rows(data.opt("trackResults")).take(pageSize).mapNotNull { row ->
+            if (text(row.opt("trackId")).ifEmpty { text(row.opt("id")) }.isEmpty()) return@mapNotNull null
+            val timeline = long(row.opt("timeline")) ?: return@mapNotNull null
             val track = track(row)
             if (!seen.add(track.id)) {
                 throw XmlyException("repeated_page", "更新列表重复，请刷新后重试")
             }
-            val timeline = time(row.opt("timeline"))
-            val previous = cursor
-            if (previous != null && timeline > previous) throw invalid
+            // Timeline is the paging cursor; it only has to be present, the
+            // service is free to return it out of order.
             cursor = timeline
-            UpdateItem(track, time(row.opt("createdAt") ?: timeline))
+            UpdateItem(track, long(row.opt("createdAt")) ?: timeline)
         }
         val hasMore = more(data)
         val next = cursor
@@ -610,6 +613,12 @@ class XmlyExperience(private val client: XmlyClient) {
 
     private fun more(data: JSONObject): Boolean =
         (data.opt("hasMore") as? Boolean) ?: throw invalid
+
+    private fun long(value: Any?): Long? = when (value) {
+        is Number -> value.toLong()
+        is String -> value.toLongOrNull()
+        else -> null
+    }?.takeIf { it >= 0 && it <= 2115354119000L }
 
     private fun time(value: Any?): Long {
         val number = when (value) {
