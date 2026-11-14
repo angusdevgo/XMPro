@@ -33,6 +33,7 @@ import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.UpdateItem
 import teikengstudio.xmpro.model.UpdatePage
 import teikengstudio.xmpro.model.XmlyException
+import teikengstudio.xmpro.model.episodeHint
 import teikengstudio.xmpro.player.EffectBus
 import teikengstudio.xmpro.player.EffectPreset
 import teikengstudio.xmpro.player.PlaybackQueueBridge
@@ -579,23 +580,103 @@ class MainViewModel(private val context: Context, private val container: AppCont
             play(track, resumePositionMs)
             return
         }
+        // A history row carries no ordinal, but its title usually spells one out;
+        // that hint lets the lookup ask for one page instead of walking the album.
+        val hint = track.orderNo ?: track.episode ?: episodeHint(track.title)
         viewModelScope.launch {
             val located = runCatching {
                 withContext(Dispatchers.IO) {
                     val client = container.client(container.activeAccount)
-                    val data = client.albumPageWith(album, track.id) ?: return@withContext null
+                    val data = client.albumPageWith(album, track.id, hint) ?: return@withContext null
                     val index = data.tracks.indexOfFirst { it.id == track.id }
-                    if (index >= 0) data.tracks to index else null
+                    if (index >= 0) Triple(data.tracks, index, data) else null
                 }
             }.getOrNull()
             if (located != null) {
                 playQueue(located.first, located.second, resumePositionMs)
+                // The page holds 200 episodes; the rest arrives in the background
+                // so the queue can page through the whole album.
+                extendQueueWithAlbum(album, located.third.total, located.third.pageSize, located.first)
             } else {
                 // Album lookup failed or the episode is gone: keep the single
                 // track playable rather than dropping the tap.
                 play(track, resumePositionMs)
             }
         }
+    }
+
+    /**
+     * Loads the remaining catalogue pages and widens the queue to the album.
+     *
+     * Batches are merged one at a time so the list grows while the user watches
+     * it, and every merge re-checks that playback has not moved elsewhere.
+     */
+    private fun extendQueueWithAlbum(
+        albumId: String,
+        total: Int,
+        pageSize: Int,
+        firstPage: List<Track>,
+    ) {
+        if (pageSize <= 0 || total <= firstPage.size) return
+        val pages = ((total + pageSize - 1) / pageSize).coerceAtMost(MAX_ALBUM_PAGES)
+        if (pages <= 1) return
+        viewModelScope.launch {
+            val loaded = sortedMapOf(1 to firstPage)
+            var page = 2
+            while (page <= pages) {
+                val batch = (page until minOf(page + QUEUE_PAGE_FETCH, pages + 1)).toList()
+                val results = batch.map { index ->
+                    index to runCatching {
+                        withContext(Dispatchers.IO) {
+                            container.client(container.activeAccount).album(albumId, page = index)
+                        }
+                    }.getOrNull()
+                }
+                for ((index, data) in results) {
+                    if (data != null) loaded[index] = data.tracks
+                }
+                page += batch.size
+                val merged = mergePages(loaded)
+                if (merged.isNotEmpty()) extendQueue(albumId, merged)
+            }
+        }
+    }
+
+    private fun mergePages(pages: Map<Int, List<Track>>): List<Track> {
+        val seen = HashSet<String>()
+        val out = ArrayList<Track>()
+        for (page in pages.keys.sorted()) {
+            for (track in pages.getValue(page)) {
+                if (seen.add(track.id)) out += track
+            }
+        }
+        return out
+    }
+
+    /** Swaps in a longer album list without touching playback. */
+    private fun extendQueue(albumId: String, tracks: List<Track>) {
+        val current = _state.value
+        val playingId = current.playing?.id ?: return
+        val belongs = (current.queueAll + current.queue).any { it.albumKey == albumId }
+        if (!belongs) return
+        val index = tracks.indexOfFirst { it.id == playingId }
+        if (index < 0) return
+        val from = current.queueFrom
+        val to = current.queueTo
+        val window = if (from != null && to != null) {
+            tracks.filter { track ->
+                val order = track.orderNo ?: (tracks.indexOf(track) + 1)
+                order in from..to
+            }
+        } else {
+            tracks
+        }
+        if (window.isEmpty()) return
+        val windowIndex = window.indexOfFirst { it.id == playingId }.coerceAtLeast(0)
+        _state.update {
+            it.copy(queueAll = tracks, queue = window, queueIndex = windowIndex)
+        }
+        publishQueue()
     }
 
     /** Plays [track] inside [queue] so next/previous walk the same list. */
@@ -1817,6 +1898,14 @@ class MainViewModel(private val context: Context, private val container: AppCont
             }
             delay(5 * 60 * 1000L)
         }
+    }
+
+    companion object {
+        /** Upper bound on catalogue pages a single queue extension may read. */
+        private const val MAX_ALBUM_PAGES = 60
+
+        /** Pages fetched per round when growing the queue. */
+        private const val QUEUE_PAGE_FETCH = 3
     }
 
     override fun onCleared() {

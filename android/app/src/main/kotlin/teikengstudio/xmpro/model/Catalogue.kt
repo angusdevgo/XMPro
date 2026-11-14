@@ -69,3 +69,12 @@ class SearchPage(
 
 /** Requests 200 items per album page, matching `xmlyAlbumPageSize`. */
 const val XMLY_ALBUM_PAGE_SIZE = 200
+
+/**
+ * Episode number written into a title, e.g. "第2347集" in a history row.
+ *
+ * Only ever a hint for the catalogue lookup: the caller still verifies that the
+ * page actually contains the episode.
+ */
+fun episodeHint(title: String): Int? =
+    Regex("第\\s*(\\d{1,6})\\s*[集话回期]").find(title)?.groupValues?.get(1)?.toIntOrNull()

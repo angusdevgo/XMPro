@@ -182,16 +182,44 @@ class XmlyClient(
      * checked alone because most taps land there; searching further is bounded so
      * a bogus id cannot walk a 3000-episode album.
      */
-    fun albumPageWith(albumId: String, trackId: String, maxPages: Int = 20): AlbumPage? {
-        val wanted = trackId.substringAfter(':')
-        var page = 1
-        var total = 0
-        while (page <= maxPages) {
-            val data = album(albumId, page = page)
-            total = data.total
-            if (data.tracks.any { it.id == "xmly:$wanted" }) return data
-            if (page * data.pageSize >= total) return null
-            page++
+    /**
+     * Finds the album page that holds [trackId].
+     *
+     * [hintOrdinal] is the episode number the caller already knows (a history
+     * row shows it in the title); it turns the common case into one request
+     * instead of walking the catalogue. The remaining pages are fetched a few
+     * at a time, because a 2000-episode album used to cost twelve sequential
+     * round trips before anything played.
+     */
+    fun albumPageWith(
+        albumId: String,
+        trackId: String,
+        hintOrdinal: Int? = null,
+        maxPages: Int = 60,
+    ): AlbumPage? {
+        val wanted = "xmly:${trackId.substringAfter(':')}"
+        fun holds(data: AlbumPage): Boolean = data.tracks.any { it.id == wanted }
+
+        if (hintOrdinal != null && hintOrdinal > 0) {
+            val candidate = (hintOrdinal - 1) / XMLY_ALBUM_PAGE_SIZE + 1
+            if (candidate <= maxPages) {
+                runCatching { album(albumId, page = candidate) }.getOrNull()
+                    ?.takeIf(::holds)
+                    ?.let { return it }
+            }
+        }
+        val first = album(albumId, page = 1)
+        if (holds(first)) return first
+        val pages = ((first.total + first.pageSize - 1) / first.pageSize).coerceAtMost(maxPages)
+        var page = 2
+        while (page <= pages) {
+            val batch = (page until minOf(page + PARALLEL_PAGE_FETCH, pages + 1)).toList()
+            val results = batch.map { index ->
+                index to runCatching { album(albumId, page = index) }.getOrNull()
+            }
+            results.firstOrNull { (_, data) -> data != null && holds(data) }
+                ?.let { return it.second }
+            page += batch.size
         }
         return null
     }
@@ -745,6 +773,9 @@ class XmlyClient(
 
         /** The comment service rejects larger pages. */
         const val MAX_COMMENT_PAGE_SIZE = 30
+
+        /** How many catalogue pages a single locate request may fetch at once. */
+        const val PARALLEL_PAGE_FETCH = 4
         const val WELFARE = "https://m.ximalaya.com"
         const val ANONYMOUS = "anonymous"
         val QUALITIES = listOf("m4a_128", "m4a_64", "mp3_64", "mp3_32", "m4a_24")
