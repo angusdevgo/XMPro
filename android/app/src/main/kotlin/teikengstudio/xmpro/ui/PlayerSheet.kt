@@ -28,6 +28,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Forward30
@@ -35,6 +37,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.TaskAlt
@@ -100,6 +103,7 @@ fun PlayerSheet(
     onQueueRange: (Int?, Int?) -> Unit = { _, _ -> },
     onOpenAlbum: (String) -> Unit = {},
     onSkipTrim: (Boolean, Int, Int, String) -> Unit = { _, _, _, _ -> },
+    onDownload: () -> Unit = {},
     commentsOpen: Boolean = false,
     comments: List<teikengstudio.xmpro.model.Comment> = emptyList(),
     commentsLoading: Boolean = false,
@@ -242,6 +246,31 @@ fun PlayerSheet(
                     tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     enabled = track != null,
                     onClick = onFavorite,
+                )
+                // Offline copy of the episode that is playing right now.
+                val savedState = state.downloads.firstOrNull { it.id == track?.id }
+                PlayerActionIcon(
+                    icon = when (savedState?.state) {
+                        null -> Icons.Filled.FileDownload
+                        teikengstudio.xmpro.download.DownloadState.DONE -> Icons.Filled.DownloadDone
+                        teikengstudio.xmpro.download.DownloadState.FAILED -> Icons.Filled.Refresh
+                        else -> Icons.Filled.FileDownload
+                    },
+                    label = when (savedState?.state) {
+                        null -> "下载"
+                        teikengstudio.xmpro.download.DownloadState.DONE -> "已下载"
+                        teikengstudio.xmpro.download.DownloadState.FAILED -> "重试下载"
+                        teikengstudio.xmpro.download.DownloadState.PAUSED -> "已暂停"
+                        else -> "下载中"
+                    },
+                    tint = if (savedState == null) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    // A finished file needs no second tap; the download page owns deletion.
+                    enabled = track != null && savedState?.state != teikengstudio.xmpro.download.DownloadState.DONE,
+                    onClick = onDownload,
                 )
                 PlayerActionIcon(
                     icon = Icons.Filled.ChatBubbleOutline,

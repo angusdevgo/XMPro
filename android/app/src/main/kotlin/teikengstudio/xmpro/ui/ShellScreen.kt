@@ -392,6 +392,7 @@ fun ShellScreen(
                         viewModel.openAlbum(albumId)
                     },
                     onSkipTrim = viewModel::setSkipTrim,
+                    onDownload = { state.playing?.let { viewModel.downloadTracks(listOf(it)) } },
                     commentsOpen = state.commentsOpen,
                     comments = state.comments,
                     commentsLoading = state.commentsLoading,
