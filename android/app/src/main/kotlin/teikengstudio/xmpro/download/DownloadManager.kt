@@ -61,12 +61,21 @@ class DownloadManager(
 
     // ------------------------------------------------------------- public API
 
-    /** Adds [tracks] to the queue, skipping what is already there. */
-    fun enqueue(tracks: List<Track>) {
+    /**
+     * Adds [tracks] to the queue, skipping what is already there.
+     *
+     * [quality] overrides the global setting for these episodes only, which is
+     * how "download this one in HD" works without touching playback.
+     */
+    fun enqueue(tracks: List<Track>, quality: String? = null) {
         if (tracks.isEmpty()) return
         val known = _tasks.value.map { it.id }.toSet()
         val added = tracks.filterNot { it.id in known }.map { track ->
-            DownloadTask(track = track, path = fileFor(track).absolutePath)
+            DownloadTask(
+                track = track,
+                path = fileFor(track).absolutePath,
+                requestQuality = quality,
+            )
         }
         if (added.isEmpty()) return
         _tasks.update { it + added }
@@ -196,10 +205,13 @@ class DownloadManager(
 
     /** Streams one episode to disk and answers with the finished path. */
     private suspend fun fetch(task: DownloadTask): String = withContext(Dispatchers.IO) {
-        val file = File(task.path)
+        val resolved = resolve(task.track, task.requestQuality ?: quality())
+        // The container only becomes known from the URL, and the player shows
+        // the file's name in logs; keep the extension honest.
+        val file = fileFor(task.track, resolved.url)
         file.parentFile?.mkdirs()
+        if (file.absolutePath != task.path) update(task.id) { it.copy(path = file.absolutePath) }
         val have = if (file.isFile) file.length() else 0L
-        val resolved = resolve(task.track, quality())
         val request = Request.Builder()
             .url(resolved.url)
             .apply {
@@ -242,9 +254,16 @@ class DownloadManager(
 
     // ------------------------------------------------------------- internals
 
-    private fun fileFor(track: Track): File {
+    private fun fileFor(track: Track, url: String? = null): File {
         val directory = directory().apply { mkdirs() }
-        val extension = track.raw["ext"]?.toString()?.takeIf { it.isNotEmpty() } ?: "m4a"
+        val fromUrl = url
+            ?.substringBefore('?')
+            ?.substringAfterLast('.', "")
+            ?.lowercase()
+            ?.takeIf { it in AUDIO_EXTENSIONS }
+        val extension = fromUrl
+            ?: track.raw["ext"]?.toString()?.takeIf { it in AUDIO_EXTENSIONS }
+            ?: "m4a"
         return File(directory, "${track.number}.$extension")
     }
 
@@ -265,6 +284,11 @@ class DownloadManager(
             _tasks.value.forEach { array.put(it.toJson()) }
             store.transaction { state -> state.put("downloads", array) }
         }
+    }
+
+    companion object {
+        /** Containers the service actually serves; anything else is ignored. */
+        private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "flac")
     }
 
     private fun describe(error: Throwable?): String = when (error) {

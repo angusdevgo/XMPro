@@ -539,6 +539,7 @@ private fun HistoryTab(
                 record = record,
                 editing = editing,
                 selected = record.track.id in selected,
+                downloaded = record.track.id in state.downloadedIds,
                 onPlay = { onPlay(record.track, (record.positionSeconds * 1000).toLong()) },
                 onToggle = {
                     val id = record.track.id
@@ -607,6 +608,7 @@ private fun FavoritesTab(
                 onPlay = { onPlay(track, 0) },
                 onOpenAlbum = onOpenAlbum,
                 onRemove = { onUnfavorite(track) },
+                downloaded = track.id in state.downloadedIds,
             )
         }
         item {
@@ -686,6 +688,9 @@ private fun BookmarksTab(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                            }
+                            if (bookmark.track.id in state.downloadedIds) {
+                                DownloadBadge()
                             }
                         }
                     }
@@ -798,6 +803,7 @@ private fun TrackLine(
     onPlay: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     onRemove: (() -> Unit)? = null,
+    downloaded: Boolean = false,
 ) {
     Surface(
         onClick = {
@@ -837,6 +843,9 @@ private fun TrackLine(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+                if (downloaded) {
+                    DownloadBadge(Modifier.padding(top = 5.dp))
+                }
             }
             if (onRemove != null) {
                 IconButton(
@@ -923,6 +932,7 @@ private fun HistoryLine(
     record: HistoryRecord,
     editing: Boolean = false,
     selected: Boolean = false,
+    downloaded: Boolean = false,
     onPlay: () -> Unit,
     onToggle: () -> Unit = {},
 ) {
@@ -980,6 +990,9 @@ private fun HistoryLine(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 3.dp),
                 )
+                if (downloaded) {
+                    DownloadBadge(Modifier.padding(top = 5.dp))
+                }
                 if (progress != null) {
                     LinearProgressIndicator(
                         progress = { progress },

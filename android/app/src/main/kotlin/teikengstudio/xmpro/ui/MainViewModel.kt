@@ -133,6 +133,8 @@ data class UiState(
     val listeningTabOrder: List<String> = ListeningTabs.defaultOrder,
     /** Offline episodes, mirrored from the download queue. */
     val downloads: List<teikengstudio.xmpro.download.DownloadTask> = emptyList(),
+    /** Episodes whose file is complete; list rows show an offline mark. */
+    val downloadedIds: Set<String> = emptySet(),
     val skipTrimEnabled: Boolean = false,
     val skipTrimMode: String = teikengstudio.xmpro.player.SmartSkip.MODE_SMART,
     val introSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
@@ -290,7 +292,17 @@ class MainViewModel(private val context: Context, private val container: AppCont
         // next episode instead of stopping silently.
         viewModelScope.launch { playback.ended.collect { onTrackEnded() } }
         viewModelScope.launch {
-            container.downloads.tasks.collect { tasks -> _state.update { it.copy(downloads = tasks) } }
+            container.downloads.tasks.collect { tasks ->
+                _state.update {
+                    it.copy(
+                        downloads = tasks,
+                        downloadedIds = tasks
+                            .filter { task -> task.state == teikengstudio.xmpro.download.DownloadState.DONE }
+                            .map { task -> task.id }
+                            .toSet(),
+                    )
+                }
+            }
         }
         viewModelScope.launch { autoClaimLoop() }
         // Silent, at most twice a day: the shell turns a hit into a dialog.
@@ -986,11 +998,11 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     // ------------------------------------------------------------------ offline
 
-    fun downloadTracks(tracks: List<Track>) {
+    fun downloadTracks(tracks: List<Track>, quality: String? = null) {
         if (tracks.isEmpty()) return
         val known = _state.value.downloads.map { it.id }.toSet()
         val added = tracks.count { it.id !in known }
-        container.downloads.enqueue(tracks)
+        container.downloads.enqueue(tracks, quality)
         _state.update {
             it.copy(
                 message = if (added > 0) "已加入 $added 个下载任务" else "这些剧集已在下载列表",

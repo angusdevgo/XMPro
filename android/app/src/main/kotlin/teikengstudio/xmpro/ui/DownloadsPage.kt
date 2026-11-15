@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -62,6 +63,10 @@ fun DownloadsPage(
     var confirming by remember { mutableStateOf(false) }
     val done = tasks.filter { it.state == DownloadState.DONE }
     val used = done.sumOf { it.total.coerceAtLeast(it.received) }
+    val working = tasks.count { it.state == DownloadState.RUNNING || it.state == DownloadState.QUEUED }
+    // Batch progress is measured in episodes, not bytes: a queue of a thousand
+    // episodes is easier to read as "37/1314" than as a byte ratio.
+    val settled = tasks.count { it.state == DownloadState.DONE || it.state == DownloadState.FAILED }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -74,9 +79,13 @@ fun DownloadsPage(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (tasks.any { it.state == DownloadState.RUNNING || it.state == DownloadState.QUEUED }) {
+                if (working > 0) {
                     Text(
-                        "队列中 ${tasks.count { it.state == DownloadState.QUEUED || it.state == DownloadState.RUNNING }} 集",
+                        if (tasks.size == working) {
+                            "队列中 $working 集"
+                        } else {
+                            "队列进度 $settled/${tasks.size} 集"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -85,6 +94,16 @@ fun DownloadsPage(
             if (tasks.isNotEmpty()) {
                 TextButton(onClick = { confirming = true }) { Text("清空") }
             }
+        }
+        if (working > 0 && tasks.isNotEmpty()) {
+            LinearProgressIndicator(
+                progress = { settled.toFloat() / tasks.size },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 2.dp)
+                    .height(3.dp)
+                    .clip(CircleShape),
+            )
         }
 
         LazyColumn(
@@ -231,6 +250,34 @@ private fun DownloadRow(
                     modifier = Modifier.size(20.dp),
                 )
             }
+        }
+    }
+}
+
+/** Small "已下载" chip shown next to an episode that plays from disk. */
+@Composable
+fun DownloadBadge(modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
+        modifier = modifier,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+        ) {
+            Icon(
+                Icons.Filled.DownloadDone,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(10.dp),
+            )
+            Spacer(Modifier.width(3.dp))
+            Text(
+                "已下载",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
         }
     }
 }

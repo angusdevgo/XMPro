@@ -103,7 +103,7 @@ fun PlayerSheet(
     onQueueRange: (Int?, Int?) -> Unit = { _, _ -> },
     onOpenAlbum: (String) -> Unit = {},
     onSkipTrim: (Boolean, Int, Int, String) -> Unit = { _, _, _, _ -> },
-    onDownload: () -> Unit = {},
+    onDownload: (String?) -> Unit = {},
     commentsOpen: Boolean = false,
     comments: List<teikengstudio.xmpro.model.Comment> = emptyList(),
     commentsLoading: Boolean = false,
@@ -121,6 +121,7 @@ fun PlayerSheet(
     var trimOpen by remember { mutableStateOf(false) }
     var speedOpen by remember { mutableStateOf(false) }
     var effectOpen by remember { mutableStateOf(false) }
+    var downloadOpen by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableFloatStateOf(-1f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -131,6 +132,7 @@ fun PlayerSheet(
             trimOpen -> trimOpen = false
             speedOpen -> speedOpen = false
             effectOpen -> effectOpen = false
+            downloadOpen -> downloadOpen = false
             else -> onDismiss()
         }
     }
@@ -270,7 +272,7 @@ fun PlayerSheet(
                     },
                     // A finished file needs no second tap; the download page owns deletion.
                     enabled = track != null && savedState?.state != teikengstudio.xmpro.download.DownloadState.DONE,
-                    onClick = onDownload,
+                    onClick = { if (savedState == null) downloadOpen = true else onDownload(null) },
                 )
                 PlayerActionIcon(
                     icon = Icons.Filled.ChatBubbleOutline,
@@ -609,6 +611,16 @@ fun PlayerSheet(
         )
     }
 
+    if (downloadOpen) {
+        DownloadQualitySheet(
+            onPick = { quality ->
+                downloadOpen = false
+                onDownload(quality)
+            },
+            onDismiss = { downloadOpen = false },
+        )
+    }
+
     if (effectOpen) {
         EffectSheet(
             preset = state.effectPreset,
@@ -689,6 +701,54 @@ private fun PlayerActionButton(
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
+    }
+}
+
+/**
+ * Picks the quality for one offline episode.
+ *
+ * Following the global setting is the default; the other three match the
+ * settings page so the same words mean the same bitrates everywhere.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun DownloadQualitySheet(onPick: (String?) -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Text(
+                "下载音质",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            )
+            Text(
+                "只影响这一集；批量下载仍使用播放设置里的音质。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+            )
+            listOf(
+                null to "跟随播放设置",
+                "m4a_128" to "高清 · AAC 128k",
+                "m4a_64" to "标准 · AAC 64k",
+                "mp3_64" to "省流 · MP3 64k",
+            ).forEach { (quality, label) ->
+                androidx.compose.material3.Surface(
+                    onClick = { onPick(quality) },
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

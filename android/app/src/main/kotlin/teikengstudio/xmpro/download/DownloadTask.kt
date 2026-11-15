@@ -26,6 +26,9 @@ enum class DownloadState {
 class DownloadTask(
     val track: Track,
     val path: String,
+    /** Quality the user picked for this episode; null follows the global one. */
+    val requestQuality: String? = null,
+    /** Quality the service actually served, filled in while downloading. */
     val quality: String = "",
     val received: Long = 0,
     val total: Long = 0,
@@ -42,16 +45,18 @@ class DownloadTask(
         }
 
     fun copy(
+        path: String = this.path,
         received: Long = this.received,
         total: Long = this.total,
         state: DownloadState = this.state,
         error: String? = this.error,
         quality: String = this.quality,
-    ) = DownloadTask(track, path, quality, received, total, state, error)
+    ) = DownloadTask(track, path, requestQuality, quality, received, total, state, error)
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("path", path)
         put("quality", quality)
+        put("request_quality", requestQuality ?: JSONObject.NULL)
         put("received", received)
         put("total", total)
         put("state", state.name)
@@ -88,6 +93,7 @@ class DownloadTask(
             return DownloadTask(
                 track = track,
                 path = path,
+                requestQuality = value.optString("request_quality").takeIf { it.isNotEmpty() },
                 quality = value.optString("quality"),
                 received = value.optLong("received"),
                 total = value.optLong("total"),

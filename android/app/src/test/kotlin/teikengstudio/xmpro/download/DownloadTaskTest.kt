@@ -61,4 +61,17 @@ class DownloadTaskTest {
         assertEquals(DownloadState.QUEUED, DownloadState.of("SOMETHING_NEW"))
         assertEquals(DownloadState.FAILED, DownloadState.of("FAILED"))
     }
+
+    @Test
+    fun `the per-episode quality survives a restart`() {
+        val task = DownloadTask(
+            track = Track(rawId = "42"),
+            path = "/tmp/a.m4a",
+            requestQuality = "m4a_128",
+        )
+        assertEquals("m4a_128", DownloadTask.fromJson(task.toJson())?.requestQuality)
+        // No override means the global setting applies, not an empty string.
+        val following = DownloadTask(track = Track(rawId = "43"), path = "/tmp/b.m4a")
+        assertNull(DownloadTask.fromJson(following.toJson())?.requestQuality)
+    }
 }
