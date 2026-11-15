@@ -34,6 +34,8 @@ class XmlyClient(
     /** Mobile base URL; overridable so tests can point it at a local server. */
     internal val mobile: String = MOBILE,
     private val searchOrigin: String = XmlyHttp.SEARCH_ORIGIN,
+    /** History collector base URL; also overridable for tests. */
+    internal val collector: String = COLLECTOR,
 ) : QuotaSource {
     val identity: String = credentials?.identity ?: ANONYMOUS
     private val albums = LinkedHashMap<String, Album>()

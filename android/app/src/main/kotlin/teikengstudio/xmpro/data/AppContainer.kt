@@ -526,6 +526,23 @@ class AppContainer(context: Context) {
         }
     }
 
+    /**
+     * Chip order of the 听书 tabs, as stored keys.
+     *
+     * An empty list means "never reordered"; callers normalise it, so a stale
+     * list written by an older build still shows every tab.
+     */
+    fun listeningTabOrder(): List<String> = store.state().optJSONObject("settings")
+        ?.optString("listeningTabs")?.split(',')?.filter { it.isNotEmpty() } ?: emptyList()
+
+    fun setListeningTabOrder(order: List<String>) {
+        store.transaction { state ->
+            val settings = state.optJSONObject("settings")
+                ?: org.json.JSONObject().also { state.put("settings", it) }
+            settings.put("listeningTabs", order.joinToString(","))
+        }
+    }
+
     /** `smart` skips silence automatically, `manual` uses the trim points. */
     fun skipTrimMode(): String = store.state().optJSONObject("settings")
         ?.optJSONObject("playback")?.optString("skipMode")?.takeIf { it.isNotEmpty() }

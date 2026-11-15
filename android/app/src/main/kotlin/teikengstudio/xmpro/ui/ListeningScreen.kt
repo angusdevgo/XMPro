@@ -22,15 +22,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Badge
 import androidx.compose.material3.FilledTonalButton
@@ -45,6 +50,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -66,7 +72,8 @@ import teikengstudio.xmpro.model.SubscriptionItem
 import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.UpdateItem
 
-private val tabs = listOf("听更新", "订阅", "历史", "收藏", "书签")
+/** Chip keys in the order the user chose; see [ListeningTabs]. */
+private fun orderedTabs(order: List<String>): List<String> = ListeningTabs.normalize(order)
 
 @Composable
 fun ListeningScreen(
@@ -81,18 +88,22 @@ fun ListeningScreen(
     onLoadMoreSubscriptions: () -> Unit,
     onLoadMoreFavorites: () -> Unit,
     onRemoveBookmark: (String) -> Unit,
+    onDeleteHistory: (List<HistoryRecord>) -> Unit = {},
+    onTabOrder: (List<String>) -> Unit = {},
     barsVisible: Boolean = true,
     onBarsHidden: (Boolean) -> Unit = {},
     onRefreshHistory: () -> Unit = {},
 ) {
+    val tabs = orderedTabs(state.listeningTabOrder)
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
+    var editingOrder by remember { mutableStateOf(false) }
     val filtered = { text: String -> query.isBlank() || text.lowercase().contains(query.lowercase()) }
 
-    // Index 2 is the history page; re-read it whenever it becomes current.
-    LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage == 2) onRefreshHistory()
+    // The history page moves with the user's order, so it is looked up by key.
+    LaunchedEffect(pagerState.currentPage, tabs) {
+        if (tabs.getOrNull(pagerState.currentPage) == ListeningTabs.HISTORY) onRefreshHistory()
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -139,8 +150,9 @@ fun ListeningScreen(
                 items(tabs.size) { index ->
                     PillChip(
                         selected = pagerState.currentPage == index,
-                        label = tabs[index],
+                        label = ListeningTabs.label(tabs[index]),
                         onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                        onLongClick = { editingOrder = true },
                     )
                 }
             }
@@ -193,8 +205,8 @@ fun ListeningScreen(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            when (page) {
-                0 -> UpdatesTab(
+            when (tabs[page]) {
+                ListeningTabs.UPDATES -> UpdatesTab(
                     state = state,
                     bottomInset = bottomInset,
                     filter = filtered,
@@ -204,7 +216,7 @@ fun ListeningScreen(
                     onBarsHidden = onBarsHidden,
                 )
 
-                1 -> SubscriptionsTab(
+                ListeningTabs.SUBSCRIPTIONS -> SubscriptionsTab(
                     state = state,
                     bottomInset = bottomInset,
                     filter = filtered,
@@ -214,15 +226,16 @@ fun ListeningScreen(
                     onBarsHidden = onBarsHidden,
                 )
 
-                2 -> HistoryTab(
+                ListeningTabs.HISTORY -> HistoryTab(
                     state = state,
                     bottomInset = bottomInset,
                     filter = filtered,
                     onPlay = onPlay,
+                    onDelete = onDeleteHistory,
                     onBarsHidden = onBarsHidden,
                 )
 
-                3 -> FavoritesTab(
+                ListeningTabs.FAVORITES -> FavoritesTab(
                     state = state,
                     bottomInset = bottomInset,
                     filter = filtered,
@@ -233,7 +246,7 @@ fun ListeningScreen(
                     onBarsHidden = onBarsHidden,
                 )
 
-                else -> BookmarksTab(
+                ListeningTabs.BOOKMARKS -> BookmarksTab(
                     state = state,
                     bottomInset = bottomInset,
                     filter = filtered,
@@ -241,6 +254,98 @@ fun ListeningScreen(
                     onRemoveBookmark = onRemoveBookmark,
                     onBarsHidden = onBarsHidden,
                 )
+            }
+        }
+
+        if (editingOrder) {
+            ListeningTabsSheet(
+                order = tabs,
+                onMove = { from, delta -> onTabOrder(ListeningTabs.move(tabs, from, delta)) },
+                onReset = { onTabOrder(ListeningTabs.defaultOrder) },
+                onDismiss = { editingOrder = false },
+            )
+        }
+    }
+}
+
+/**
+ * Reorder sheet for the 听书 chips.
+ *
+ * Arrow buttons rather than drag and drop: the list is five rows tall and the
+ * pager underneath is swipeable, so a drag would fight the horizontal gesture.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun ListeningTabsSheet(
+    order: List<String>,
+    onMove: (Int, Int) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "标签排序",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "用箭头调整顺序，长按顶部标签可再次打开",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = onReset) { Text("恢复默认") }
+        }
+        LazyColumn(Modifier.padding(bottom = 24.dp)) {
+            itemsIndexed(order) { index, key ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Text(
+                            (index + 1).toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                    Text(
+                        ListeningTabs.label(key),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                    )
+                    IconButton(
+                        onClick = { onMove(index, -1) },
+                        enabled = index > 0,
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowUp,
+                            contentDescription = "前移",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    IconButton(
+                        onClick = { onMove(index, 1) },
+                        enabled = index < order.lastIndex,
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowDown,
+                            contentDescription = "后移",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
         }
     }
@@ -377,18 +482,69 @@ private fun HistoryTab(
     bottomInset: Dp,
     filter: (String) -> Boolean,
     onPlay: (Track, Long) -> Unit,
+    onDelete: (List<HistoryRecord>) -> Unit,
     onBarsHidden: (Boolean) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     ScrollHideEffect(listState, onBarsHidden)
     val visible = state.history.filter { filter("${it.track.title} ${it.track.album}") }
+    var editing by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateListOf<String>() }
+    var confirming by remember { mutableStateOf(false) }
+    // Rows can disappear after a delete, so dead selections are dropped rather
+    // than blocking the next delete on a record that no longer exists.
+    LaunchedEffect(visible) {
+        val alive = visible.map { it.track.id }.toSet()
+        selected.retainAll { it in alive }
+        if (visible.isEmpty()) editing = false
+    }
     LazyColumn(
         Modifier.fillMaxSize(),
         state = listState,
         contentPadding = PaddingValues(top = 4.dp, bottom = bottomInset),
     ) {
+        if (visible.isNotEmpty()) {
+            item(key = "history-actions") {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (editing) "已选 ${selected.size} 条" else "共 ${visible.size} 条记录",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (editing) {
+                        TextButton(
+                            onClick = { confirming = true },
+                            enabled = selected.isNotEmpty(),
+                        ) {
+                            Text("删除")
+                        }
+                    }
+                    TextButton(
+                        onClick = {
+                            editing = !editing
+                            if (!editing) selected.clear()
+                        },
+                    ) {
+                        Text(if (editing) "完成" else "编辑")
+                    }
+                }
+            }
+        }
         datedItems(visible, { it.updatedAt }, { record ->
-            HistoryLine(record) { onPlay(record.track, (record.positionSeconds * 1000).toLong()) }
+            HistoryLine(
+                record = record,
+                editing = editing,
+                selected = record.track.id in selected,
+                onPlay = { onPlay(record.track, (record.positionSeconds * 1000).toLong()) },
+                onToggle = {
+                    val id = record.track.id
+                    if (id in selected) selected.remove(id) else selected.add(id)
+                },
+            )
         })
         if (visible.isEmpty()) {
             item {
@@ -397,6 +553,32 @@ private fun HistoryTab(
                 Empty(if (state.signedIn) "暂无云历史记录" else "登录后可查看云端历史")
             }
         }
+    }
+
+    if (confirming) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("删除历史记录") },
+            text = {
+                Text("将从云端一并删除 ${selected.size} 条记录，喜马拉雅其他客户端也会同步消失。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val chosen = state.history.filter { it.track.id in selected }
+                        confirming = false
+                        editing = false
+                        selected.clear()
+                        onDelete(chosen)
+                    },
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -737,14 +919,20 @@ private fun SubscriptionLine(
 }
 
 @Composable
-private fun HistoryLine(record: HistoryRecord, onPlay: () -> Unit) {
+private fun HistoryLine(
+    record: HistoryRecord,
+    editing: Boolean = false,
+    selected: Boolean = false,
+    onPlay: () -> Unit,
+    onToggle: () -> Unit = {},
+) {
     val progress = if (record.track.duration > 0) {
         (record.positionSeconds / record.track.duration).toFloat().coerceIn(0f, 1f)
     } else {
         null
     }
     Surface(
-        onClick = onPlay,
+        onClick = if (editing) onToggle else onPlay,
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier
@@ -755,6 +943,19 @@ private fun HistoryLine(record: HistoryRecord, onPlay: () -> Unit) {
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (editing) {
+                Icon(
+                    if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                    contentDescription = if (selected) "取消选择" else "选择",
+                    tint = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
             Cover(record.track.coverUrl, 52)
             Column(
                 modifier = Modifier
@@ -790,15 +991,17 @@ private fun HistoryLine(record: HistoryRecord, onPlay: () -> Unit) {
                     )
                 }
             }
-            FilledTonalIconButton(
-                onClick = onPlay,
-                modifier = Modifier.size(36.dp),
-            ) {
-                Icon(
-                    Icons.Filled.PlayArrow,
-                    contentDescription = "续播",
-                    modifier = Modifier.size(20.dp),
-                )
+            if (!editing) {
+                FilledTonalIconButton(
+                    onClick = onPlay,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = "续播",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }

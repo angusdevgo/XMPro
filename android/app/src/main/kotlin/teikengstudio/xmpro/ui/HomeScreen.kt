@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -382,22 +383,21 @@ fun CapsuleSearchField(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PillChip(
     selected: Boolean,
     label: String,
     compact: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-    ) {
+    val color = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val body = @Composable {
         Text(
             text = label,
             style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
@@ -414,6 +414,19 @@ fun PillChip(
                 vertical = if (compact) 6.dp else 8.dp,
             ),
         )
+    }
+    // A plain Surface cannot hold both callbacks, so the long press path swaps
+    // the clickable receiver; without a long press the Surface keeps its own.
+    if (onLongClick == null) {
+        Surface(onClick = onClick, shape = CircleShape, color = color) { body() }
+    } else {
+        Surface(
+            shape = CircleShape,
+            color = color,
+            modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        ) {
+            body()
+        }
     }
 }
 

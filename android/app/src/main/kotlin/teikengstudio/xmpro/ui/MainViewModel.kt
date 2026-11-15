@@ -129,6 +129,8 @@ data class UiState(
     val updateNotes: String? = null,
     /** About page switch: probe for a new release on start-up. */
     val autoCheckUpdate: Boolean = true,
+    /** Chip order of the 听书 tabs; always normalised against [ListeningTabs]. */
+    val listeningTabOrder: List<String> = ListeningTabs.defaultOrder,
     val skipTrimEnabled: Boolean = false,
     val skipTrimMode: String = teikengstudio.xmpro.player.SmartSkip.MODE_SMART,
     val introSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
@@ -240,6 +242,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
             effectStrength = container.effectStrength(),
             updateMirror = container.updateMirror(),
             autoCheckUpdate = container.autoCheckUpdate(),
+            listeningTabOrder = ListeningTabs.normalize(container.listeningTabOrder()),
             skipTrimEnabled = container.skipTrimEnabled(),
             skipTrimMode = container.skipTrimMode(),
             introSkipPermille = container.introSkipPermille(),
@@ -961,6 +964,40 @@ class MainViewModel(private val context: Context, private val container: AppCont
     /** Reloads the cloud history after the app returns to the foreground. */
     fun onAppForegrounded() = refreshHistory()
 
+    /**
+     * Deletes rows from the cloud history.
+     *
+     * The service accepts one record per call, so they go out in order and the
+     * list only drops the rows the service confirmed; on failure the rest stay
+     * visible instead of pretending they are gone.
+     */
+    fun deleteHistory(records: List<HistoryRecord>) {
+        if (records.isEmpty()) return
+        val identity = container.activeAccount ?: return
+        viewModelScope.launch {
+            val removed = mutableSetOf<String>()
+            var failure: String? = null
+            withContext(Dispatchers.IO) {
+                val history = XmlyHistory(container.client(identity))
+                for (record in records) {
+                    try {
+                        history.delete(record)
+                        removed += record.track.id
+                    } catch (error: Exception) {
+                        failure = describe(error)
+                        break
+                    }
+                }
+            }
+            _state.update { current ->
+                current.copy(
+                    history = current.history.filterNot { it.track.id in removed },
+                    message = failure ?: "已删除 ${removed.size} 条历史记录",
+                )
+            }
+        }
+    }
+
     /** [minutes] == null cancels the timer. */
     fun setSleepTimer(minutes: Int?) {
         sleepJob?.cancel()
@@ -1134,6 +1171,18 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     fun dismissUpdatePrompt() =
         _state.update { it.copy(updatePrompt = false, updatePromptTag = null) }
+
+    /**
+     * Reorders the 听书 chips.
+     *
+     * The order is persisted immediately: the sheet is a live editor, so there
+     * is no separate "save" step the user could close without applying.
+     */
+    fun setListeningTabOrder(order: List<String>) {
+        val normalized = ListeningTabs.normalize(order)
+        container.setListeningTabOrder(normalized)
+        _state.update { it.copy(listeningTabOrder = normalized) }
+    }
 
     fun downloadUpdate() {
         val release = pendingRelease ?: return

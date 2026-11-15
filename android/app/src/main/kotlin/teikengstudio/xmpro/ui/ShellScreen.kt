@@ -219,6 +219,8 @@ fun ShellScreen(
                         onLoadMoreSubscriptions = viewModel::loadMoreSubscriptions,
                         onLoadMoreFavorites = viewModel::loadMoreFavorites,
                         onRemoveBookmark = viewModel::removeBookmark,
+                        onDeleteHistory = viewModel::deleteHistory,
+                        onTabOrder = viewModel::setListeningTabOrder,
                         barsVisible = barsVisible,
                         onBarsHidden = { barsHidden = it },
                     )

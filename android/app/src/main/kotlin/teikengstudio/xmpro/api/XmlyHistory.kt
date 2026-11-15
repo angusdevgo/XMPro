@@ -130,13 +130,44 @@ class XmlyHistory(
         form["signature"] = signature
         val response = client.request(
             "POST",
-            XmlyClient.COLLECTOR,
+            client.collector,
             "/nyx/v1/history/merge/android",
             form = form,
             readOnly = true,
         )
         val point = data(response).opt("syncPoint")?.toString()?.toLongOrNull() ?: -1
         if (point < 0) throw XmlyException("history_unconfirmed", "未能确认历史进度同步")
+    }
+
+    /**
+     * Removes one row from the cloud history.
+     *
+     * The service takes the album/track pair plus a millisecond stamp and
+     * answers with a new sync point, so only `ret` decides success. A delete is
+     * a write: the request is never replayed when the outcome is unknown.
+     */
+    fun delete(record: HistoryRecord) {
+        val context = context()
+        val album = record.track.albumKey
+        if (album.isEmpty()) throw invalid("缺少专辑标识")
+        val params = linkedMapOf(
+            "itemId" to album,
+            "childId" to record.track.number,
+            "type" to "1",
+            "deleteTime" to clock().toString(),
+        )
+        val form = linkedMapOf<String, String>()
+        params.forEach { (key, value) -> form[key] = value }
+        form["signature"] = signature(params + context)
+        // A non-zero business code is already turned into an exception by the
+        // transport, so reaching here means the service accepted the delete.
+        client.request(
+            "POST",
+            client.collector,
+            "/nyx/v1/history/delete/android",
+            form = form,
+            readOnly = false,
+        )
     }
 
     private fun data(response: JSONObject): JSONObject {
