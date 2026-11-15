@@ -95,6 +95,49 @@ import teikengstudio.xmpro.ui.theme.SeedPresets
 private enum class SettingsPage { Root, Account, Playback, Downloads, Appearance, Backup, About }
 
 /**
+ * Release notes as headings plus bullets.
+ *
+ * Long notes scroll inside a capped box so the dialog never grows past the
+ * screen and hides its own buttons.
+ */
+@Composable
+private fun ReleaseNotesBody(notes: ReleaseNotes) {
+    Column(
+        Modifier
+            .padding(top = 10.dp)
+            .heightIn(max = 260.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        notes.sections.forEach { section ->
+            if (section.title.isNotEmpty()) {
+                Text(
+                    section.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                )
+            }
+            section.items.forEach { item ->
+                Row(Modifier.padding(vertical = 1.dp)) {
+                    Text(
+                        "·",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        item,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
  * Start-up update offer: download in place, then hand over to the installer.
  *
  * The same download path as the about page is used, so the SHA-256 check and the
@@ -111,6 +154,7 @@ fun UpdatePromptDialog(
     onDismiss: () -> Unit,
 ) {
     val downloading = progress in 0..99 && !ready
+    val parsed = remember(notes) { ReleaseNotes.parse(notes) }
     AlertDialog(
         onDismissRequest = { if (!downloading) onDismiss() },
         icon = { Icon(Icons.Filled.SystemUpdate, contentDescription = null) },
@@ -121,10 +165,15 @@ fun UpdatePromptDialog(
                     when {
                         ready -> "安装包已下载并通过校验。"
                         downloading -> "正在下载安装包…"
-                        else -> notes?.takeIf { it.isNotBlank() } ?: "可以下载并安装这个版本。"
+                        parsed.isEmpty -> "可以下载并安装这个版本。"
+                        // The notes speak for themselves once downloading starts.
+                        else -> "本次更新的内容："
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                if (!downloading && !parsed.isEmpty) {
+                    ReleaseNotesBody(parsed)
+                }
                 if (downloading) {
                     LinearProgressIndicator(
                         progress = { (progress.coerceAtLeast(0) / 100f) },
@@ -1969,7 +2018,7 @@ private fun AboutPage(
         SettingsGroup {
             SettingSwitchRow(
                 title = "自动检查更新",
-                subtitle = "启动时最多每 12 小时检测一次，发现新版本会弹窗提示",
+                subtitle = "启动或回到前台时最多每 12 小时检测一次，发现新版本会弹窗提示",
                 checked = state.autoCheckUpdate,
                 onCheckedChange = onAutoCheckUpdate,
             )

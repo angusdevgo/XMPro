@@ -188,23 +188,6 @@ fun normalizeSpeed(raw: Float): Float {
     return snapped.coerceIn(MIN_SPEED, MAX_SPEED)
 }
 
-/**
- * Turns a release body into plain lines: heading markers and bullet dashes
- * read badly inside a dialog.
- */
-internal fun formatReleaseNotes(notes: String): String = notes
-    .lineSequence()
-    .map { line ->
-        when {
-            line.startsWith("#") -> ""
-            line.startsWith("- ") || line.startsWith("* ") -> "· " + line.drop(2)
-            else -> line.trim()
-        }
-    }
-    .filter { it.isNotEmpty() }
-    .joinToString("\n")
-    .trim()
-
 class MainViewModel(private val context: Context, private val container: AppContainer) : ViewModel() {
     private var ticker: Job? = null
     private val playback = container.playback
@@ -262,6 +245,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
      * audio plays, and copying the whole UI state that often invalidated every
      * screen that receives it, including the home feed.
      */
+    /** Set for the whole request so two entry points cannot check at once. */
+    private var updateCheckInFlight = false
+
     private val _position = MutableStateFlow(0L)
     val positionMs: StateFlow<Long> = _position.asStateFlow()
 
@@ -307,14 +293,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
             container.downloads.tasks.collect { tasks -> _state.update { it.copy(downloads = tasks) } }
         }
         viewModelScope.launch { autoClaimLoop() }
-        // Silent, at most once a day: the shell turns a hit into a dialog.
-        viewModelScope.launch {
-            delay(2500)
-            if (!container.autoCheckUpdate()) return@launch
-            val last = container.updateCheckedAt()
-            if (System.currentTimeMillis() - last < 12 * 60 * 60 * 1000L) return@launch
-            checkUpdate(silent = true)
-        }
+        // Silent, at most twice a day: the shell turns a hit into a dialog.
+        // Foregrounding asks again, so a warm process cannot skip a release.
+        autoCheckUpdateSoon()
         if (initialAccounts.isNotEmpty()) syncProfiles()
     }
 
@@ -978,7 +959,30 @@ class MainViewModel(private val context: Context, private val container: AppCont
     }
 
     /** Reloads the cloud history after the app returns to the foreground. */
-    fun onAppForegrounded() = refreshHistory()
+    fun onAppForegrounded() {
+        refreshHistory()
+        autoCheckUpdateSoon()
+    }
+
+    /**
+     * Runs the silent update check when the throttle allows it.
+     *
+     * The check used to live in `init` only, so an app that stayed in memory
+     * never asked again and the user had to check by hand.
+     */
+    private fun autoCheckUpdateSoon() {
+        if (!UpdateCheck.due(container.autoCheckUpdate(), container.updateCheckedAt(), System.currentTimeMillis())) {
+            return
+        }
+        viewModelScope.launch {
+            delay(2_000)
+            // Re-read: a manual check may have finished during the wait.
+            if (!UpdateCheck.due(container.autoCheckUpdate(), container.updateCheckedAt(), System.currentTimeMillis())) {
+                return@launch
+            }
+            checkUpdate(silent = true)
+        }
+    }
 
     // ------------------------------------------------------------------ offline
 
@@ -1146,7 +1150,8 @@ class MainViewModel(private val context: Context, private val container: AppCont
      * failure stays invisible instead of reporting a network problem.
      */
     fun checkUpdate(silent: Boolean = false) {
-        if (_state.value.updateChecking) return
+        if (updateCheckInFlight) return
+        updateCheckInFlight = true
         if (!silent) _state.update { it.copy(updateChecking = true, updateResult = null, updateUrl = null) }
         val mirror = _state.value.updateMirror
         val current = runCatching {
@@ -1179,11 +1184,12 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     updateReady = false,
                     updatePrompt = release != null,
                     updatePromptTag = release?.tag,
-                    updateNotes = release?.notes?.let(::formatReleaseNotes),
+                    updateNotes = release?.notes?.takeIf { it.isNotBlank() },
                 )
             }
             pendingRelease = release
             pendingFile = null
+            updateCheckInFlight = false
         }
     }
 
@@ -1206,7 +1212,11 @@ class MainViewModel(private val context: Context, private val container: AppCont
      */
     fun setAutoCheckUpdate(enabled: Boolean) {
         container.setAutoCheckUpdate(enabled)
-        if (enabled) container.setUpdateCheckedAt(0L)
+        if (enabled) {
+            // Switching back on is a request to look now, not in twelve hours.
+            container.setUpdateCheckedAt(0L)
+            autoCheckUpdateSoon()
+        }
         _state.update {
             it.copy(
                 autoCheckUpdate = enabled,
