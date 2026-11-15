@@ -334,7 +334,10 @@ fun PlayerSheet(
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // A downloaded episode reports "本地文件", which is not a
+                    // quality code; show it as-is instead of hiding the label.
                     val quality = formatQuality(state.playingQuality)
+                        .ifEmpty { state.playingQuality }
                     if (quality.isNotEmpty()) {
                         Text(
                             quality,

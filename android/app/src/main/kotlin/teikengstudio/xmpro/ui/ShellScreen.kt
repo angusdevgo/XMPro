@@ -262,6 +262,11 @@ fun ShellScreen(
                         onDynamicColor = viewModel::setDynamicColor,
                         onSeedColor = viewModel::setSeedColor,
                         onOpenSocial = viewModel::openSocial,
+                        onPauseDownload = viewModel::pauseDownload,
+                        onResumeDownload = viewModel::resumeDownload,
+                        onRemoveDownload = viewModel::removeDownload,
+                        onClearDownloads = viewModel::clearAllDownloads,
+                        onPlayDownload = { viewModel.play(it) },
                         onCloseSocial = viewModel::closeSocial,
                         onOpenUser = viewModel::openUser,
                         onExportBackup = viewModel::exportBackup,
@@ -322,6 +327,7 @@ fun ShellScreen(
                     onPlay = viewModel::playAlbum,
                     onSubscribe = viewModel::setSubscribed,
                     onSelectRange = viewModel::setAlbumRange,
+                    onDownload = viewModel::downloadTracks,
                 )
             }
         }

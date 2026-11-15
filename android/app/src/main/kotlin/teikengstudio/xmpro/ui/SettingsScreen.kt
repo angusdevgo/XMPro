@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.ui.platform.LocalContext
@@ -91,7 +92,7 @@ import java.util.Locale
 import teikengstudio.xmpro.data.AccountSummary
 import teikengstudio.xmpro.ui.theme.SeedPresets
 
-private enum class SettingsPage { Root, Account, Playback, Appearance, Backup, About }
+private enum class SettingsPage { Root, Account, Playback, Downloads, Appearance, Backup, About }
 
 /**
  * Start-up update offer: download in place, then hand over to the installer.
@@ -191,6 +192,11 @@ fun SettingsScreen(
     onDynamicColor: (Boolean) -> Unit,
     onSeedColor: (Int) -> Unit,
     onOpenSocial: (String) -> Unit,
+    onPauseDownload: (String) -> Unit = {},
+    onResumeDownload: (String) -> Unit = {},
+    onRemoveDownload: (String) -> Unit = {},
+    onClearDownloads: () -> Unit = {},
+    onPlayDownload: (teikengstudio.xmpro.model.Track) -> Unit = {},
     onCloseSocial: () -> Unit,
     onOpenUser: (String) -> Unit,
     onExportBackup: (android.net.Uri, Boolean) -> Unit,
@@ -374,6 +380,19 @@ fun SettingsScreen(
                 }
             }
 
+            SettingsPage.Downloads -> {
+                PageHeader("下载", onBack = { page = SettingsPage.Root })
+                DownloadsPage(
+                    tasks = state.downloads,
+                    bottomInset = bottomInset,
+                    onPlay = onPlayDownload,
+                    onPause = onPauseDownload,
+                    onResume = onResumeDownload,
+                    onRemove = onRemoveDownload,
+                    onClearAll = onClearDownloads,
+                )
+            }
+
             SettingsPage.Appearance -> {
                 PageHeader("外观", onBack = { page = SettingsPage.Root })
                 Column(
@@ -549,6 +568,18 @@ private fun SettingsRoot(
                 subtitle = "音质 · 跳过头尾",
                 icon = Icons.Filled.PlayCircleOutline,
                 onClick = { onNavigate(SettingsPage.Playback) },
+            )
+            GroupDivider()
+            SettingsRow(
+                title = "下载",
+                subtitle = if (state.downloads.isEmpty()) {
+                    "离线剧集与存储占用"
+                } else {
+                    "已下载 ${state.downloads.count { it.state == teikengstudio.xmpro.download.DownloadState.DONE }} 集 · " +
+                        formatBytes(state.downloads.sumOf { it.total.coerceAtLeast(it.received) })
+                },
+                icon = Icons.Filled.FileDownload,
+                onClick = { onNavigate(SettingsPage.Downloads) },
             )
             GroupDivider()
             SettingsRow(

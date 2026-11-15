@@ -28,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.PlayArrow
@@ -71,6 +73,7 @@ fun AlbumScreen(
     onPlay: (Track) -> Unit,
     onSubscribe: (String, Boolean) -> Unit,
     onSelectRange: (Int?, Int?) -> Unit,
+    onDownload: (List<Track>) -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
 
@@ -79,6 +82,12 @@ fun AlbumScreen(
     val subscribed = album != null && state.subscriptions.any { it.album.id == album.id }
     var expandIntro by remember { mutableStateOf(false) }
     var rangeSheet by remember { mutableStateOf(false) }
+    var confirmAll by remember { mutableStateOf(false) }
+    // Only a finished file is "downloaded"; queued rows still show the entry.
+    val downloaded = state.downloads
+        .filter { it.state == teikengstudio.xmpro.download.DownloadState.DONE }
+        .map { it.id }
+        .toSet()
     val window = state.albumTracks()
 
     Column(
@@ -207,6 +216,23 @@ fun AlbumScreen(
                                     Spacer(Modifier.width(4.dp))
                                     Text(
                                         "播放第 1 集",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        maxLines = 1,
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = { confirmAll = true },
+                                    shape = CircleShape,
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.FileDownload,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        "下载",
                                         style = MaterialTheme.typography.labelLarge,
                                         maxLines = 1,
                                     )
@@ -377,6 +403,25 @@ fun AlbumScreen(
                                     modifier = Modifier.padding(top = 3.dp),
                                 )
                             }
+                            val saved = track.id in downloaded
+                            val queued = state.downloads.any { it.id == track.id }
+                            IconButton(
+                                onClick = { if (!queued) onDownload(listOf(track)) },
+                                enabled = !queued,
+                                modifier = Modifier.size(34.dp),
+                            ) {
+                                Icon(
+                                    if (saved) Icons.Filled.DownloadDone else Icons.Filled.FileDownload,
+                                    contentDescription = if (saved) "已下载" else "下载本集",
+                                    tint = if (saved) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(4.dp))
                             FilledTonalIconButton(
                                 onClick = { onPlay(track) },
                                 modifier = Modifier.size(34.dp),
@@ -391,6 +436,37 @@ fun AlbumScreen(
                     }
                 }
             }
+            if (confirmAll) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { confirmAll = false },
+                    title = { Text("下载整本") },
+                    text = {
+                        val count = window.count { it.id !in downloaded }
+                        Text(
+                            if (count == 0) {
+                                "这本专辑的剧集都已加入下载。"
+                            } else {
+                                "将把当前列表里的 $count 集加入下载队列，全部完成前会一直显示在「我的 · 下载」里。"
+                            },
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                confirmAll = false
+                                onDownload(window.filterNot { it.id in downloaded })
+                            },
+                            enabled = window.any { it.id !in downloaded },
+                        ) {
+                            Text("开始下载")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmAll = false }) { Text("取消") }
+                    },
+                )
+            }
+
             if (rangeSheet) {
                 val total = page.total.coerceAtLeast(page.tracks.size)
                 ModalBottomSheet(

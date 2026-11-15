@@ -53,6 +53,21 @@ class AppContainer(context: Context) {
 
     val ledger = UsageLedger(store, quotaSource)
 
+    /**
+     * Offline episodes.
+     *
+     * Resolution goes through the account-bound client so the same permission
+     * rules as streaming apply; files stay in the private external directory so
+     * an uninstall takes them with it.
+     */
+    val downloads: teikengstudio.xmpro.download.DownloadManager = teikengstudio.xmpro.download.DownloadManager(
+        context = appContext,
+        store = store,
+        directory = { File(appContext.getExternalFilesDir(null) ?: appContext.filesDir, "xmpro/audio") },
+        resolve = { track, quality -> client(activeAccount).resolve(track.number, quality) },
+        quality = { playbackQuality() },
+    )
+
     val playback = teikengstudio.xmpro.player.PlaybackController(appContext).apply {
         // Connecting early keeps the RPC warm; the service itself only starts
         // when a media item is set.

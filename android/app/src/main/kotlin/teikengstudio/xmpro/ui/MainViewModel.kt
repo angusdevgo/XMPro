@@ -131,6 +131,8 @@ data class UiState(
     val autoCheckUpdate: Boolean = true,
     /** Chip order of the 听书 tabs; always normalised against [ListeningTabs]. */
     val listeningTabOrder: List<String> = ListeningTabs.defaultOrder,
+    /** Offline episodes, mirrored from the download queue. */
+    val downloads: List<teikengstudio.xmpro.download.DownloadTask> = emptyList(),
     val skipTrimEnabled: Boolean = false,
     val skipTrimMode: String = teikengstudio.xmpro.player.SmartSkip.MODE_SMART,
     val introSkipPermille: Int = teikengstudio.xmpro.data.DEFAULT_SKIP_PERMILLE,
@@ -301,6 +303,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
         // A track that runs to its end stops the player; roll on to the queue's
         // next episode instead of stopping silently.
         viewModelScope.launch { playback.ended.collect { onTrackEnded() } }
+        viewModelScope.launch {
+            container.downloads.tasks.collect { tasks -> _state.update { it.copy(downloads = tasks) } }
+        }
         viewModelScope.launch { autoClaimLoop() }
         // Silent, at most once a day: the shell turns a hit into a dialog.
         viewModelScope.launch {
@@ -701,40 +706,51 @@ class MainViewModel(private val context: Context, private val container: AppCont
         viewModelScope.launch {
             try {
                 val quality = _state.value.quality
-                val resolved = withContext(Dispatchers.IO) {
-                    container.client(container.activeAccount).resolve(track.number, quality)
+                // A downloaded episode plays from disk: no resolution round trip,
+                // no signed URL to expire, and it works with no network at all.
+                val local = container.downloads.localFile(track.id)
+                var url = local?.toURI()?.toString().orEmpty()
+                var played = track
+                var label = if (local != null) "本地文件" else ""
+                if (local == null) {
+                    val resolved = withContext(Dispatchers.IO) {
+                        container.client(container.activeAccount).resolve(track.number, quality)
+                    }
+                    url = resolved.url
+                    played = resolved.track
+                    label = resolved.actualQuality
                 }
                 // A newer tap already won; drop this result instead of overriding it.
                 if (request != playRequest) return@launch
                 val startAt = if (resumePositionMs > 0) {
                     resumePositionMs
                 } else {
-                    introSeekMs(resolved.track.duration)
+                    introSeekMs(played.duration)
                 }
                 playback.setVolume(_state.value.playVolume)
                 playback.setSpeed(_state.value.speed)
                 // The resolve payload does not always carry the length, but the
                 // catalogue entry does; the notification needs it to show a total.
-                val durationSeconds = resolved.track.duration.takeIf { it > 0 }
+                val durationSeconds = played.duration.takeIf { it > 0 }
                     ?: queue.getOrNull(index)?.duration
                     ?: 0.0
                 playback.start(
-                    url = resolved.url,
-                    title = resolved.track.title,
+                    url = url,
+                    title = played.title,
                     artist = listOfNotNull(
-                        resolved.track.album.takeIf { it.isNotEmpty() },
-                        resolved.track.artist.takeIf { it.isNotEmpty() },
+                        played.album.takeIf { it.isNotEmpty() },
+                        played.artist.takeIf { it.isNotEmpty() },
                     ).joinToString(" · "),
-                    artworkUrl = resolved.track.coverUrl,
-                    mediaId = resolved.track.id,
+                    artworkUrl = played.coverUrl,
+                    mediaId = played.id,
                     durationMs = (durationSeconds * 1000).toLong(),
                     startPositionMs = startAt,
                 ) {
                     if (request != playRequest) return@start
-                    sessionTrack = resolved.track
+                    sessionTrack = played
                     sessionStartedAt = System.currentTimeMillis()
                     sessionIdentity = container.activeAccount
-                    _state.update { it.copy(playing = resolved.track, playingQuality = resolved.actualQuality) }
+                    _state.update { it.copy(playing = played, playingQuality = label) }
                     publishQueue()
                     // Record the switch immediately: leaving the app straight
                     // after picking another episode must still move the cloud
@@ -963,6 +979,36 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     /** Reloads the cloud history after the app returns to the foreground. */
     fun onAppForegrounded() = refreshHistory()
+
+    // ------------------------------------------------------------------ offline
+
+    fun downloadTracks(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        val known = _state.value.downloads.map { it.id }.toSet()
+        val added = tracks.count { it.id !in known }
+        container.downloads.enqueue(tracks)
+        _state.update {
+            it.copy(
+                message = if (added > 0) "已加入 $added 个下载任务" else "这些剧集已在下载列表",
+            )
+        }
+    }
+
+    fun pauseDownload(id: String) = container.downloads.pause(id)
+
+    fun resumeDownload(id: String) = container.downloads.resume(id)
+
+    fun removeDownload(id: String) = container.downloads.remove(id)
+
+    fun clearFinishedDownloads() {
+        container.downloads.clearFinished()
+        _state.update { it.copy(message = "已清理完成的下载") }
+    }
+
+    fun clearAllDownloads() {
+        container.downloads.clearAll()
+        _state.update { it.copy(message = "已清空所有下载") }
+    }
 
     /**
      * Deletes rows from the cloud history.
