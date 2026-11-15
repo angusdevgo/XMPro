@@ -3,19 +3,20 @@ package teikengstudio.xmpro.ui
 /**
  * When the silent update check is allowed to run.
  *
- * Kept apart from the view model so the boundary can be tested: a bad throttle
- * either spams the API or hides releases for days, and both are invisible in
- * manual testing.
+ * Every entry into the app asks GitHub once, so a published release shows up the
+ * next time the user opens the app instead of hours later. [GAP_MS] only stops
+ * the two entry points (cold start and the first foreground event) from firing
+ * the same check twice in a row.
  */
 object UpdateCheck {
-    /** At most twice a day, matching the about page's wording. */
-    const val INTERVAL_MS = 12 * 60 * 60 * 1000L
+    /** De-duplication window for the launch pair, not a rate limit. */
+    const val GAP_MS = 10_000L
 
     fun due(enabled: Boolean, lastCheckedAt: Long, now: Long): Boolean {
         if (!enabled) return false
-        // A clock that jumped backwards must not lock the check out forever.
+        // A clock that jumped backwards must not lock the check out.
         val elapsed = now - lastCheckedAt
         if (elapsed < 0) return true
-        return elapsed >= INTERVAL_MS
+        return elapsed >= GAP_MS
     }
 }

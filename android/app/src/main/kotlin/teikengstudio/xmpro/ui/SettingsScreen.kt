@@ -2018,7 +2018,7 @@ private fun AboutPage(
         SettingsGroup {
             SettingSwitchRow(
                 title = "自动检查更新",
-                subtitle = "启动或回到前台时最多每 12 小时检测一次，发现新版本会弹窗提示",
+                subtitle = "每次启动或回到前台都会检测，发现新版本立即弹窗提示",
                 checked = state.autoCheckUpdate,
                 onCheckedChange = onAutoCheckUpdate,
             )

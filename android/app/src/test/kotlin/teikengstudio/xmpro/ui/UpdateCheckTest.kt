@@ -18,10 +18,12 @@ class UpdateCheckTest {
     }
 
     @Test
-    fun `the window is twelve hours`() {
-        assertFalse(UpdateCheck.due(true, now - 11 * 60 * 60 * 1000L, now))
-        assertFalse(UpdateCheck.due(true, now - UpdateCheck.INTERVAL_MS + 1_000, now))
-        assertTrue(UpdateCheck.due(true, now - UpdateCheck.INTERVAL_MS, now))
+    fun `only the launch pair is de-duplicated`() {
+        // Cold start and the first foreground event arrive together.
+        assertFalse(UpdateCheck.due(true, now - 2_000L, now))
+        // Coming back to the app a moment later asks again: there is no window.
+        assertTrue(UpdateCheck.due(true, now - 60_000L, now))
+        assertTrue(UpdateCheck.due(true, now - UpdateCheck.GAP_MS, now))
     }
 
     @Test

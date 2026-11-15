@@ -250,6 +250,14 @@ class MainViewModel(private val context: Context, private val container: AppCont
     /** Set for the whole request so two entry points cannot check at once. */
     private var updateCheckInFlight = false
 
+    /**
+     * Tag the user waved away in this process.
+     *
+     * Entering the app asks again, but re-opening the same dialog the user just
+     * dismissed is noise; a new release, or a fresh process, asks again.
+     */
+    private var suppressedUpdateTag: String? = null
+
     private val _position = MutableStateFlow(0L)
     val positionMs: StateFlow<Long> = _position.asStateFlow()
 
@@ -1194,7 +1202,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     updateUrl = release?.apkUrl ?: release?.pageUrl,
                     updateProgress = -1,
                     updateReady = false,
-                    updatePrompt = release != null,
+                    updatePrompt = release != null && release.tag != suppressedUpdateTag,
                     updatePromptTag = release?.tag,
                     updateNotes = release?.notes?.takeIf { it.isNotBlank() },
                 )
@@ -1237,8 +1245,10 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
-    fun dismissUpdatePrompt() =
+    fun dismissUpdatePrompt() {
+        suppressedUpdateTag = _state.value.updatePromptTag
         _state.update { it.copy(updatePrompt = false, updatePromptTag = null) }
+    }
 
     /**
      * Reorders the 听书 chips.
