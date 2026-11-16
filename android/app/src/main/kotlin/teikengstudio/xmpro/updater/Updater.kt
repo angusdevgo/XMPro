@@ -25,10 +25,14 @@ object Updater {
     private const val LATEST = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
     const val WEB_URL = "https://github.com/$OWNER/$REPO"
 
-    /** Common prefixes; users can also type their own. */
+    /**
+     * Common prefixes; users can also type their own.
+     *
+     * These proxies come and go, so the downloader never trusts one of them:
+     * it walks [candidates] until a server actually answers.
+     */
     val MIRRORS = listOf(
         "" to "直连 GitHub",
-        "https://ghfast.top/" to "ghfast.top",
         "https://gh-proxy.com/" to "gh-proxy.com",
         "https://ghproxy.net/" to "ghproxy.net",
     )
@@ -36,8 +40,11 @@ object Updater {
     class Release(
         val tag: String,
         val notes: String,
+        /** Download link, pre-proxied with the user's mirror when one is set. */
         val apkUrl: String?,
         val apkName: String,
+        /** The plain GitHub link, used to build the fallback candidates. */
+        val rawUrl: String,
         /** Link to the release's SHA256SUMS asset, when it published one. */
         val sumsUrl: String?,
         val pageUrl: String,
@@ -80,6 +87,7 @@ object Updater {
             val assets = payload.optJSONArray("assets")
             var apk: String? = null
             var apkName = ""
+            var raw = ""
             var sums: String? = null
             if (assets != null) {
                 for (index in 0 until assets.length()) {
@@ -88,7 +96,8 @@ object Updater {
                     when {
                         name.endsWith(".apk") && apk == null -> {
                             apkName = name
-                            apk = proxied(asset.optString("browser_download_url"), mirror)
+                            raw = asset.optString("browser_download_url")
+                            apk = proxied(raw, mirror)
                         }
 
                         name == "SHA256SUMS" -> {
@@ -102,6 +111,7 @@ object Updater {
                 notes = payload.optString("body").take(1500),
                 apkUrl = apk,
                 apkName = apkName,
+                rawUrl = raw,
                 sumsUrl = sums,
                 pageUrl = payload.optString("html_url").ifEmpty { WEB_URL },
             )
@@ -110,6 +120,24 @@ object Updater {
         } finally {
             connection.disconnect()
         }
+    }
+
+    /**
+     * The download addresses to try, in order.
+     *
+     * The user's mirror comes first because they chose it, then the plain
+     * GitHub link, then the other known proxies. GitHub's release CDN is
+     * unreachable on many mainland networks while a proxy works, and the other
+     * way around just as often, so no single address is trusted.
+     */
+    internal fun candidates(preferred: String, raw: String, mirrors: List<String> = MIRRORS.map { it.first }): List<String> {
+        val list = ArrayList<String>()
+        if (preferred.isNotBlank()) list += preferred
+        list += raw
+        for (prefix in mirrors) {
+            if (prefix.isNotBlank()) list += prefix + raw
+        }
+        return list.distinct()
     }
 
     /** Turns socket noise into something a user can act on. */
@@ -140,34 +168,68 @@ object Updater {
     }
 
     /**
-     * Downloads [url] into the app's private update folder and verifies it.
+     * Downloads the release's APK and verifies it.
      *
-     * The digest is computed while streaming, so nothing unverified ever sits in
-     * a path the installer can reach. [onProgress] receives 0..100, or -1 when
-     * the server reports no length (mirrors often strip it).
+     * Every candidate address is tried in order with a short timeout, so a
+     * blocked GitHub CDN or a dead proxy costs seconds instead of the whole
+     * download. The digest is computed while streaming, and the SHA256SUMS
+     * asset is fetched from whichever address served the file. [onProgress]
+     * receives 0..100, or -1 when the server reports no length (mirrors often
+     * strip it).
      */
     fun download(
         context: Context,
-        url: String,
-        tag: String,
-        expectedSha: String?,
+        release: Release,
+        mirror: String,
         onProgress: (Int) -> Unit,
     ): Download {
         val folder = File(context.filesDir, "update").apply { mkdirs() }
         // Remove leftovers so a failed attempt cannot be installed later.
         folder.listFiles()?.forEach { it.delete() }
-        val target = File(folder, "xmpro-" + tag.removePrefix("v") + ".apk")
+        val target = File(folder, "xmpro-" + release.tag.removePrefix("v") + ".apk")
+        val apk = release.apkUrl ?: release.rawUrl
+        if (apk.isBlank()) return Download.Failed("该版本没有提供安装包")
+        var failure: String? = null
+        for (candidate in candidates(apk, release.rawUrl)) {
+            onProgress(0)
+            when (val attempt = stream(context, candidate, target, onProgress)) {
+                is Attempt.Ok -> {
+                    val expected = checksums(
+                        candidate.substringBeforeLast('/') + "/SHA256SUMS",
+                    )[release.apkName]
+                    return verify(target, expected)
+                }
+                is Attempt.Busy -> failure = attempt.reason
+            }
+        }
+        target.delete()
+        return Download.Failed(failure ?: "所有下载地址均无法连接，请检查网络后重试")
+    }
+
+    /** One address attempt; [Busy] carries the reason the address did not work. */
+    private sealed interface Attempt {
+        class Ok : Attempt
+        class Busy(val reason: String) : Attempt
+    }
+
+    /** Streams [url] into [target]; the caller decides whether to try another. */
+    private fun stream(
+        context: Context,
+        url: String,
+        target: File,
+        onProgress: (Int) -> Unit,
+    ): Attempt {
         val digest = MessageDigest.getInstance("SHA-256")
         try {
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 20_000
-                readTimeout = 30_000
+                connectTimeout = 8_000
+                readTimeout = 20_000
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", "XMPro")
             }
             try {
                 if (connection.responseCode !in 200..299) {
-                    return Download.Failed("下载失败（HTTP " + connection.responseCode + "）")
+                    return Attempt.Busy("HTTP " + connection.responseCode)
                 }
                 val total = connection.contentLengthLong
                 var read = 0L
@@ -189,13 +251,27 @@ object Updater {
             }
         } catch (error: Exception) {
             target.delete()
-            return Download.Failed(friendly(error))
+            return Attempt.Busy(friendly(error))
         }
         if (target.length() <= 0L) {
             target.delete()
-            return Download.Failed("下载内容为空，请换用其他镜像")
+            return Attempt.Busy("下载内容为空")
         }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        return Attempt.Ok()
+    }
+
+    /** Checks the streamed file against [expectedSha]; deletes it on mismatch. */
+    private fun verify(target: File, expectedSha: String?): Download {
+        val actual = target.inputStream().use { input ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count <= 0) break
+                digest.update(buffer, 0, count)
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        }
         if (expectedSha.isNullOrEmpty()) {
             // Without a published digest the file cannot be verified; say so
             // rather than quietly trusting whatever arrived.

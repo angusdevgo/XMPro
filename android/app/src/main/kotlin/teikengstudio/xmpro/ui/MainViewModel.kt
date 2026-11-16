@@ -1397,19 +1397,14 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     fun downloadUpdate() {
         val release = pendingRelease ?: return
-        val url = release.apkUrl ?: return
         if (_state.value.updateProgress >= 0) return
         _state.update { it.copy(updateProgress = 0, updateReady = false) }
         viewModelScope.launch {
             val outcome = withContext(Dispatchers.IO) {
-                val expected = release.sumsUrl
-                    ?.takeIf { it.isNotEmpty() }
-                    ?.let { sumsUrl -> teikengstudio.xmpro.updater.Updater.checksums(sumsUrl)[release.apkName] }
                 teikengstudio.xmpro.updater.Updater.download(
                     context = context,
-                    url = url,
-                    tag = release.tag,
-                    expectedSha = expected,
+                    release = release,
+                    mirror = container.updateMirror(),
                 ) { percent ->
                     _state.update { state ->
                         if (state.updateProgress == percent) state else state.copy(updateProgress = percent)
