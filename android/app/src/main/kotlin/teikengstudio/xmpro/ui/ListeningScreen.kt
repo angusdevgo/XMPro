@@ -540,6 +540,10 @@ private fun HistoryTab(
                 editing = editing,
                 selected = record.track.id in selected,
                 downloaded = record.track.id in state.downloadedIds,
+                older = state.albumPositions[record.track.albumKey]
+                    .orEmpty()
+                    .filter { it.track.id != record.track.id },
+                onResumeOlder = { place -> onPlay(place.track, (place.positionSeconds * 1000).toLong()) },
                 onPlay = { onPlay(record.track, (record.positionSeconds * 1000).toLong()) },
                 onToggle = {
                     val id = record.track.id
@@ -933,21 +937,28 @@ private fun HistoryLine(
     editing: Boolean = false,
     selected: Boolean = false,
     downloaded: Boolean = false,
+    /** Earlier places of the same album, remembered on this device. */
+    older: List<teikengstudio.xmpro.model.PlayPosition> = emptyList(),
+    onResumeOlder: (teikengstudio.xmpro.model.PlayPosition) -> Unit = {},
     onPlay: () -> Unit,
     onToggle: () -> Unit = {},
 ) {
+    var olderOpen by remember { mutableStateOf(false) }
     val progress = if (record.track.duration > 0) {
         (record.positionSeconds / record.track.duration).toFloat().coerceIn(0f, 1f)
     } else {
         null
     }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
     Surface(
         onClick = if (editing) onToggle else onPlay,
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -1017,6 +1028,57 @@ private fun HistoryLine(
                 }
             }
         }
+    }
+    // The cloud keeps one row per album; the places this device also visited are
+    // tucked under the row instead of cluttering the list.
+    if (!editing && older.isNotEmpty()) {
+        TextButton(
+            onClick = { olderOpen = !olderOpen },
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 0.dp, bottom = 0.dp),
+        ) {
+            Text(
+                if (olderOpen) "收起这本书的其它位置" else "这本书还有 ${older.size} 个位置",
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        if (olderOpen) {
+            older.forEach { place ->
+                Surface(
+                    onClick = { onResumeOlder(place) },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 4.dp, bottom = 4.dp),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            place.track.title.ifEmpty { place.track.number },
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            formatDuration(place.positionSeconds),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = "从这里续播",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+        }
+    }
     }
 }
 

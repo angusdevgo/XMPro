@@ -71,6 +71,7 @@ fun AlbumScreen(
     bottomInset: Dp,
     onBack: () -> Unit,
     onPlay: (Track) -> Unit,
+    onResume: (Track, Long) -> Unit = { track, _ -> onPlay(track) },
     onSubscribe: (String, Boolean) -> Unit,
     onSelectRange: (Int?, Int?) -> Unit,
     onDownload: (List<Track>) -> Unit = {},
@@ -203,8 +204,27 @@ fun AlbumScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                // The cloud history knows the last episode of this
+                                // album, so the button resumes it instead of always
+                                // restarting from episode one.
+                                val resume = state.albumResume
+                                val resumeLabel = resume?.let { record ->
+                                    val ordinal = record.track.orderNo
+                                        ?: record.track.episode
+                                        ?: teikengstudio.xmpro.model.episodeHint(record.track.title)
+                                    if (ordinal != null) "继续播放 第 $ordinal 集" else "继续播放"
+                                }
                                 Button(
-                                    onClick = { page.tracks.firstOrNull()?.let(onPlay) },
+                                    onClick = {
+                                        if (resume != null) {
+                                            onResume(
+                                                resume.track,
+                                                (resume.positionSeconds * 1000).toLong(),
+                                            )
+                                        } else {
+                                            page.tracks.firstOrNull()?.let(onPlay)
+                                        }
+                                    },
                                     shape = CircleShape,
                                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                 ) {
@@ -215,7 +235,7 @@ fun AlbumScreen(
                                     )
                                     Spacer(Modifier.width(4.dp))
                                     Text(
-                                        "播放第 1 集",
+                                        resumeLabel ?: "播放第 1 集",
                                         style = MaterialTheme.typography.labelLarge,
                                         maxLines = 1,
                                     )

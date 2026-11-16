@@ -42,12 +42,14 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,6 +78,7 @@ fun HomeScreen(
     state: UiState,
     bottomInset: Dp,
     onSearch: (String, String) -> Unit,
+    onSearchMore: () -> Unit,
     onClearSearch: () -> Unit,
     onRefreshHome: () -> Unit,
     onOpenAlbum: (String) -> Unit,
@@ -258,6 +261,44 @@ fun HomeScreen(
                             track = track,
                             onPlay = { onPlay(track) },
                         )
+                    }
+                }
+                if (state.searchMore) {
+                    item(key = "search-more") {
+                        // Compose only builds the footer once the list has been
+                        // scrolled to its end, which is exactly the moment to ask
+                        // for the next page.
+                        LaunchedEffect(state.searchPage, state.searchKind) { onSearchMore() }
+                        Box(
+                            Modifier.fillMaxWidth().padding(vertical = 18.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (state.searchLoadingMore) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Text(
+                                    "上滑加载更多",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                } else if (state.tracks.isNotEmpty() || state.albums.isNotEmpty()) {
+                    item(key = "search-end") {
+                        Box(
+                            Modifier.fillMaxWidth().padding(vertical = 18.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "没有更多了",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             } else {

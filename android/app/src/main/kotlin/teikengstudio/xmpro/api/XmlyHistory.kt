@@ -72,6 +72,47 @@ class XmlyHistory(
         throw XmlyException("history_limit", "历史记录超过 5000 条上限")
     }
 
+    /**
+     * The newest [limit] records without walking the whole history.
+     *
+     * `records()` keeps paging until the service says it is done, which is fine
+     * for the history tab but too expensive for a single lookup such as "where
+     * did this album stop".
+     */
+    fun newest(limit: Int = 100): List<HistoryRecord> {
+        if (limit <= 0) return emptyList()
+        val context = context()
+        val items = linkedMapOf<String, HistoryRecord>()
+        var page = 1
+        while (items.size < limit && page <= 50) {
+            val response = client.request(
+                "GET",
+                XmlyClient.MOBILE,
+                "/nyx/v1/history/query/android",
+                query = mapOf(
+                    "pageId" to page.toString(),
+                    "pageSize" to "100",
+                    "syncPoint" to "0",
+                    "timeStamp" to clock().toString(),
+                    "uid" to (context["uid"] ?: ""),
+                ),
+            )
+            val data = data(response)
+            val raw = data.optJSONArray("listenModels") ?: break
+            for (index in 0 until raw.length()) {
+                val record = normalize(raw.optJSONObject(index) ?: continue) ?: continue
+                val existing = items[record.track.id]
+                if (existing == null || record.updatedAt > existing.updatedAt) {
+                    items[record.track.id] = record
+                }
+                if (items.size >= limit) break
+            }
+            if (data.opt("hasMore") != true || raw.length() == 0) break
+            page++
+        }
+        return items.values.sortedByDescending { it.updatedAt }
+    }
+
     fun progress(albumId: String = "", trackId: String = ""): HistoryRecord? {
         if (albumId.isEmpty() && trackId.isEmpty()) {
             throw XmlyException("invalid_history", "请指定声音或专辑", definitive = true)

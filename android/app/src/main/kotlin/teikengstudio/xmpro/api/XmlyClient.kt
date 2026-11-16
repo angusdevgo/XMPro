@@ -757,6 +757,9 @@ class XmlyClient(
 
     companion object {
         const val MOBILE = "https://mobile.ximalaya.com"
+
+        /** Web origin, used by the endpoints the website itself calls. */
+        const val WEB = "https://www.ximalaya.com"
         const val COLLECTOR = "https://xdcs-collector.ximalaya.com"
 
         /**

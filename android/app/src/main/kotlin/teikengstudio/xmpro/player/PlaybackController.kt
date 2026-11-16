@@ -35,9 +35,14 @@ class PlaybackController(private val context: Context) {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    /** Emits when the current item runs to its end, so the queue can advance. */
-    private val _ended = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
-    val ended: SharedFlow<Unit> = _ended.asSharedFlow()
+    /**
+     * Emits the media id of the item that ran to its end.
+     *
+     * The id matters: swapping media items makes the player report ENDED for the
+     * outgoing item, and advancing on that would skip the episode just chosen.
+     */
+    private val _ended = MutableSharedFlow<String?>(extraBufferCapacity = 4)
+    val ended: SharedFlow<String?> = _ended.asSharedFlow()
 
     private var controller: MediaController? = null
     private var playbackStarted: (() -> Unit)? = null
@@ -56,7 +61,9 @@ class PlaybackController(private val context: Context) {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED) _ended.tryEmit(Unit)
+            if (playbackState == Player.STATE_ENDED) {
+                _ended.tryEmit(controller?.currentMediaItem?.mediaId)
+            }
         }
 
         override fun onEvents(player: Player, events: Player.Events) {

@@ -27,11 +27,13 @@ import teikengstudio.xmpro.model.HistoryRecord
 import teikengstudio.xmpro.model.HomeChannel
 import teikengstudio.xmpro.model.HomeSection
 import teikengstudio.xmpro.model.HomeTab
+import teikengstudio.xmpro.model.SearchPage
 import teikengstudio.xmpro.model.SubscriptionItem
 import teikengstudio.xmpro.model.SubscriptionPage
 import teikengstudio.xmpro.model.Track
 import teikengstudio.xmpro.model.UpdateItem
 import teikengstudio.xmpro.model.UpdatePage
+import teikengstudio.xmpro.model.xmlyIdentifier
 import teikengstudio.xmpro.model.XmlyException
 import teikengstudio.xmpro.model.episodeHint
 import teikengstudio.xmpro.player.EffectBus
@@ -55,12 +57,20 @@ data class UiState(
     val searchKind: String = "album",
     val tracks: List<Track> = emptyList(),
     val albums: List<Album> = emptyList(),
+    /** Page the search has loaded so far; 0 before the first answer. */
+    val searchPage: Int = 0,
+    val searchTotal: Int = 0,
+    /** Whether another result page can be requested. */
+    val searchMore: Boolean = false,
+    val searchLoadingMore: Boolean = false,
     val album: AlbumPage? = null,
     /** Episode window currently shown for the open album, if limited. */
     val albumRangeStart: Int? = null,
     val albumRangeEnd: Int? = null,
     val albumRangeBusy: Boolean = false,
     val albumLoading: Boolean = false,
+    /** Where this album was left off, when the cloud history knows about it. */
+    val albumResume: HistoryRecord? = null,
     val albumError: String? = null,
     val playing: Track? = null,
     val playingTitle: String? = null,
@@ -129,6 +139,14 @@ data class UiState(
     val updateNotes: String? = null,
     /** About page switch: probe for a new release on start-up. */
     val autoCheckUpdate: Boolean = true,
+    /**
+     * Positions remembered locally per album, newest first.
+     *
+     * The cloud history answers one row per album, so earlier places only exist
+     * on this device.
+     */
+    val albumPositions: Map<String, List<teikengstudio.xmpro.model.PlayPosition>> = emptyMap(),
+
     /** Chip order of the 听书 tabs; always normalised against [ListeningTabs]. */
     val listeningTabOrder: List<String> = ListeningTabs.defaultOrder,
     /** Offline episodes, mirrored from the download queue. */
@@ -298,7 +316,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
         // A track that runs to its end stops the player; roll on to the queue's
         // next episode instead of stopping silently.
-        viewModelScope.launch { playback.ended.collect { onTrackEnded() } }
+        viewModelScope.launch { playback.ended.collect { mediaId -> onTrackEnded(mediaId) } }
         viewModelScope.launch {
             container.downloads.tasks.collect { tasks ->
                 _state.update {
@@ -313,6 +331,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
             }
         }
         viewModelScope.launch { autoClaimLoop() }
+        refreshPositions()
         // Silent, at most twice a day: the shell turns a hit into a dialog.
         // Foregrounding asks again, so a warm process cannot skip a release.
         autoCheckUpdateSoon()
@@ -473,7 +492,19 @@ class MainViewModel(private val context: Context, private val container: AppCont
     fun search(query: String, kind: String = _state.value.searchKind) {
         if (query.isBlank()) return
         _state.update {
-            it.copy(query = query, searchKind = kind, searching = true, searchError = null, album = null)
+            it.copy(
+                query = query,
+                searchKind = kind,
+                searching = true,
+                searchError = null,
+                album = null,
+                tracks = emptyList(),
+                albums = emptyList(),
+                searchPage = 0,
+                searchTotal = 0,
+                searchMore = false,
+                searchLoadingMore = false,
+            )
         }
         viewModelScope.launch {
             try {
@@ -481,7 +512,14 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     container.client(container.activeAccount).search(query, kind = kind)
                 }
                 _state.update {
-                    it.copy(searching = false, tracks = page.tracks, albums = page.albums)
+                    it.copy(
+                        searching = false,
+                        tracks = page.tracks,
+                        albums = page.albums,
+                        searchPage = page.page,
+                        searchTotal = page.total,
+                        searchMore = hasAnotherPage(page, page.tracks.size + page.albums.size),
+                    )
                 }
             } catch (error: Exception) {
                 _state.update { it.copy(searching = false, searchError = describe(error)) }
@@ -489,18 +527,91 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
+    /**
+     * Appends the next result page.
+     *
+     * The search endpoint always answered with a single page of 20 rows, so the
+     * list simply stopped even when thousands of matches existed. A failure here
+     * stays silent: the rows already on screen remain usable and the footer just
+     * stops offering more.
+     */
+    fun searchMore() {
+        val snapshot = _state.value
+        if (snapshot.query.isBlank() || snapshot.searching || snapshot.searchLoadingMore) return
+        if (!snapshot.searchMore) return
+        val kind = snapshot.searchKind
+        val next = snapshot.searchPage + 1
+        _state.update { it.copy(searchLoadingMore = true) }
+        viewModelScope.launch {
+            try {
+                val page = withContext(Dispatchers.IO) {
+                    container.client(container.activeAccount)
+                        .search(snapshot.query, kind = kind, page = next)
+                }
+                _state.update { state ->
+                    // A keyword typed meanwhile must not be polluted by the page
+                    // that was already in flight.
+                    if (state.query != snapshot.query || state.searchKind != kind) {
+                        state.copy(searchLoadingMore = false)
+                    } else {
+                        val tracks = (state.tracks + page.tracks).distinctBy { it.id }
+                        val albums = (state.albums + page.albums).distinctBy { it.id }
+                        val arrived = page.tracks.size + page.albums.size
+                        state.copy(
+                            tracks = tracks,
+                            albums = albums,
+                            searchPage = next,
+                            searchTotal = page.total,
+                            searchLoadingMore = false,
+                            searchMore = arrived > 0 && hasAnotherPage(page, tracks.size + albums.size),
+                        )
+                    }
+                }
+            } catch (error: Exception) {
+                _state.update { it.copy(searchLoadingMore = false, searchMore = false) }
+            }
+        }
+    }
+
+    /** An empty page or an unknown total ends the list. */
+    private fun hasAnotherPage(page: SearchPage, loaded: Int): Boolean {
+        if (loaded == 0) return false
+        if (page.total > 0) return loaded < page.total
+        return page.tracks.size + page.albums.size >= page.pageSize
+    }
+
     fun clearSearch() = _state.update {
-        it.copy(query = "", tracks = emptyList(), albums = emptyList(), searchError = null)
+        it.copy(
+            query = "",
+            tracks = emptyList(),
+            albums = emptyList(),
+            searchError = null,
+            searchPage = 0,
+            searchTotal = 0,
+            searchMore = false,
+            searchLoadingMore = false,
+        )
     }
 
     fun openAlbum(albumId: String) {
         _state.update { it.copy(album = null, albumLoading = true, albumError = null) }
         viewModelScope.launch {
             try {
-                val page = withContext(Dispatchers.IO) {
-                    container.client(container.activeAccount).album(albumId)
+                val client = container.client(container.activeAccount)
+                val (page, resume) = coroutineScope {
+                    val detail = async(Dispatchers.IO) { client.album(albumId) }
+                    // One extra lookup beside the album fetch; it only decides how
+                    // the big play button is labelled, so a failure stays harmless.
+                    val where = async(Dispatchers.IO) {
+                        runCatching {
+                            XmlyHistory(client).newest().firstOrNull {
+                                it.track.albumKey == xmlyIdentifier(albumId)
+                            }
+                        }.getOrNull()
+                    }
+                    detail.await() to where.await()
                 }
-                _state.update { it.copy(album = page, albumLoading = false) }
+                _state.update { it.copy(album = page, albumLoading = false, albumResume = resume) }
             } catch (error: Exception) {
                 _state.update { it.copy(albumLoading = false, albumError = describe(error)) }
             }
@@ -515,6 +626,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
             albumRangeStart = null,
             albumRangeEnd = null,
             albumRangeBusy = false,
+            albumResume = null,
         )
     }
 
@@ -691,6 +803,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
     /** Plays [track] inside [queue] so next/previous walk the same list. */
     fun playQueue(queue: List<Track>, index: Int, resumePositionMs: Long = 0) {
         val track = queue.getOrNull(index) ?: return
+        lastPlayStartedAt = System.currentTimeMillis()
         // Report the outgoing track before the player swaps media.
         if (sessionTrack != null && sessionTrack?.id != track.id) syncProgress()
         _state.update {
@@ -799,6 +912,18 @@ class MainViewModel(private val context: Context, private val container: AppCont
         playQueue(tracks, tracks.indexOf(track).coerceAtLeast(0))
     }
 
+    /**
+     * Starts the album where it was left off.
+     *
+     * The remembered episode is often outside the loaded page, so the containing
+     * page is fetched when the visible list does not hold it.
+     */
+    fun playAlbumFrom(track: Track, resumePositionMs: Long = 0) {
+        val tracks = _state.value.albumTracks()
+        val index = tracks.indexOfFirst { it.id == track.id }
+        if (index >= 0) playQueue(tracks, index, resumePositionMs) else playInAlbum(track, resumePositionMs)
+    }
+
     /** Plays the "listening updates" feed from [track]'s position. */
     fun playUpdates(track: Track) {
         val tracks = _state.value.updates.map { it.track }
@@ -847,16 +972,24 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     private var lastAdvanceAt = 0L
 
+    /** When the last play request was issued, to ignore the outgoing item's ENDED. */
+    private var lastPlayStartedAt = 0L
+
     /**
      * Rolls onto the next episode when one finishes on its own.
      *
      * The trim ticker advances at the tail as well, so the first caller wins and
      * the other one is dropped instead of skipping an episode.
      */
-    private fun onTrackEnded() {
+    private fun onTrackEnded(mediaId: String?) {
         val current = _state.value
         if (current.queue.isEmpty()) return
         val now = System.currentTimeMillis()
+        // Swapping media makes the player report ENDED for the item that is
+        // leaving; rolling on then would jump straight past the episode the user
+        // just picked.
+        if (mediaId != null && current.playing != null && mediaId != current.playing?.id) return
+        if (now - lastPlayStartedAt < 1500L) return
         if (now - lastAdvanceAt < 2000L) return
         lastAdvanceAt = now
         syncProgress()
@@ -1487,12 +1620,27 @@ class MainViewModel(private val context: Context, private val container: AppCont
      * Called on pause, track change, and from the ticker, so a killed process
      * loses at most one interval of progress.
      */
+    /** Re-reads the locally remembered album positions. */
+    private fun refreshPositions() {
+        val grouped = runCatching {
+            container.positions()
+                .mapNotNull { teikengstudio.xmpro.model.PlayPosition.fromJson(it) }
+                .groupBy { it.albumKey }
+                .mapValues { (_, rows) -> rows.sortedByDescending { it.at } }
+        }.getOrDefault(emptyMap())
+        _state.update { it.copy(albumPositions = grouped) }
+    }
+
     private fun syncProgress() {
         val track = sessionTrack ?: return
         val started = sessionStartedAt
         if (started <= 0) return
         val position = playback.currentPosition() / 1000.0
         val endedAt = System.currentTimeMillis()
+        // Written before the network call so a failed sync still keeps the place
+        // reachable from this device.
+        runCatching { container.rememberPosition(track, position) }
+        refreshPositions()
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {

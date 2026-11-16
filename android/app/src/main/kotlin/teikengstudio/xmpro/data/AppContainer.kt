@@ -359,6 +359,66 @@ class AppContainer(context: Context) {
         }.sortedByDescending { it.createdAt }
     }
 
+    /**
+     * Positions remembered for each album, newest first.
+     *
+     * The cloud history answers one row per album, so a book that was left at
+     * episode 1200 cannot be reopened at episode 40 from the server alone.
+     */
+    fun positions(): List<org.json.JSONObject> {
+        val identity = activeAccount ?: return emptyList()
+        val items = store.state()
+            .optJSONObject("library")
+            ?.optJSONObject(identity)
+            ?.optJSONArray("positions")
+            ?: return emptyList()
+        return (0 until items.length()).mapNotNull { items.optJSONObject(it) }
+    }
+
+    /**
+     * Remembers [positionSeconds] of [track], keeping the newest
+     * [MAX_POSITIONS_PER_ALBUM] places of every album.
+     */
+    fun rememberPosition(track: Track, positionSeconds: Double): List<org.json.JSONObject> {
+        val identity = activeAccount ?: return emptyList()
+        val album = track.albumKey
+        if (album.isEmpty() || !positionSeconds.isFinite()) return positions()
+        val position = positionSeconds.coerceIn(0.0, 2_147_483_647.0)
+        val entry = teikengstudio.xmpro.model.PlayPosition(
+            track = track,
+            positionSeconds = position,
+            at = System.currentTimeMillis(),
+        ).toJson()
+        store.transaction { state ->
+            val library = state.optJSONObject("library")
+                ?: org.json.JSONObject().also { state.put("library", it) }
+            val account = library.optJSONObject(identity)
+                ?: org.json.JSONObject().also { library.put(identity, it) }
+            val existing = account.optJSONArray("positions") ?: org.json.JSONArray()
+            val perAlbum = mutableMapOf<String, Int>()
+            val kept = org.json.JSONArray()
+            // Newest first, one row per episode, capped per album.
+            kept.put(entry)
+            perAlbum[album] = 1
+            for (index in 0 until existing.length()) {
+                val row = existing.optJSONObject(index) ?: continue
+                val rowAlbum = row.optString("album_id")
+                if (rowAlbum == album && row.optString("number") == track.number) continue
+                val count = perAlbum[rowAlbum] ?: 0
+                if (count >= MAX_POSITIONS_PER_ALBUM) continue
+                perAlbum[rowAlbum] = count + 1
+                kept.put(row)
+            }
+            // Keep the file small: only the most recent albums are worth keeping.
+            val trimmed = org.json.JSONArray()
+            for (index in 0 until minOf(kept.length(), MAX_POSITION_ROWS)) {
+                trimmed.put(kept.optJSONObject(index) ?: continue)
+            }
+            account.put("positions", trimmed)
+        }
+        return positions()
+    }
+
     /** Adds or refreshes the bookmark for one track. */
     fun addBookmark(track: Track, positionMs: Long): List<Bookmark> {
         val identity = activeAccount ?: return emptyList()
@@ -654,3 +714,9 @@ class AppContainer(context: Context) {
         activeAccount = store.state().optString("activeAccountId").takeIf { it.isNotEmpty() && credentials.load(it) != null }
     }
 }
+
+/** Positions kept per album, matching the history tab's "3 newest" promise. */
+private const val MAX_POSITIONS_PER_ALBUM = 3
+
+/** Total rows kept across all albums, so the file stays small. */
+private const val MAX_POSITION_ROWS = 120

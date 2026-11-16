@@ -285,22 +285,35 @@ class XmlyExperience(private val client: XmlyClient) {
         return UpdatePage(items, hasMore && next != null && next > 0, next)
     }
 
+    /**
+     * Subscribes or unsubscribes an album.
+     *
+     * The mobile subscribe paths answer `ret=791` for every request, so the web
+     * endpoint is used instead; it reports `ret=200` with a Chinese message and
+     * is what the site's own button calls.
+     */
     fun setSubscribed(albumId: String, subscribed: Boolean) {
         requireAccount()
         val id = xmlyIdentifier(albumId)
         val path = if (subscribed) {
-            "/subscribe/album-subscribe/and/ask-anchor-info"
+            "/revision/subscription/setSubscriptionAlbum"
         } else {
-            "/subscribe/album/subscribe/delete"
+            "/revision/subscription/cancelSubscriptionAlbum"
         }
         val payload = client.request(
             "POST",
-            XmlyClient.MOBILE,
+            XmlyClient.WEB,
             path,
             form = mapOf("albumId" to id),
             readOnly = false,
         )
-        if (integer(payload.opt("ret")) != 0) throw invalid
+        if (!accepted(payload.opt("ret"))) throw invalid
+    }
+
+    /** The web app answers 200; keep 0 working in case the mobile form returns. */
+    private fun accepted(value: Any?): Boolean {
+        val ret = integer(value)
+        return ret == 200 || ret == 0
     }
 
     fun setFavorite(track: Track, favorite: Boolean) {
