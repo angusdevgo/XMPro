@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -110,6 +111,8 @@ data class UiState(
     val queueIndex: Int = 0,
     val speed: Float = 1f,
     val sleepAtMillis: Long? = null,
+    /** Sleep timer that fires when the current episode ends instead of on a clock. */
+    val sleepAtTrackEnd: Boolean = false,
     val bookmarks: List<teikengstudio.xmpro.data.Bookmark> = emptyList(),
     /** Requested audio quality (auto / m4a_128 / m4a_64 / mp3_32). */
     val quality: String = "auto",
@@ -165,6 +168,8 @@ data class UiState(
     val userLoading: Boolean = false,
     val userError: String? = null,
     val socialKind: String? = null,
+    /** Episode counts for subscribed albums; the subscription feed omits them. */
+    val subscriptionTotals: Map<String, Int> = emptyMap(),
     val socialUsers: List<teikengstudio.xmpro.model.SocialUser> = emptyList(),
     val socialLoading: Boolean = false,
     val favoriteIds: Set<String> = emptySet(),
@@ -227,7 +232,6 @@ class MainViewModel(private val context: Context, private val container: AppCont
      * account that consumed the listening time, not to whatever is active later.
      */
     private var sessionIdentity: String? = null
-    private var sleepJob: Job? = null
 
     private val initialAccounts = container.accounts()
 
@@ -704,6 +708,10 @@ class MainViewModel(private val context: Context, private val container: AppCont
         // A history row carries no ordinal, but its title usually spells one out;
         // that hint lets the lookup ask for one page instead of walking the album.
         val hint = track.orderNo ?: track.episode ?: episodeHint(track.title)
+        // The lookup takes a round trip, so a second tap can land while the
+        // first one is still in flight. Taking a token here means the late
+        // answer is dropped instead of hijacking playback.
+        val request = ++playRequest
         viewModelScope.launch {
             val located = runCatching {
                 withContext(Dispatchers.IO) {
@@ -713,6 +721,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     if (index >= 0) Triple(data.tracks, index, data) else null
                 }
             }.getOrNull()
+            if (request != playRequest) return@launch
             if (located != null) {
                 playQueue(located.first, located.second, resumePositionMs)
                 // The page holds 200 episodes; the rest arrives in the background
@@ -927,7 +936,10 @@ class MainViewModel(private val context: Context, private val container: AppCont
     /** Plays the "listening updates" feed from [track]'s position. */
     fun playUpdates(track: Track) {
         val tracks = _state.value.updates.map { it.track }
-        playQueue(tracks, tracks.indexOf(track).coerceAtLeast(0))
+        val index = tracks.indexOfFirst { it.id == track.id }
+        // The feed can drop an episode between the tap and the play; playing
+        // the album around it is far better than ignoring the tap.
+        if (index < 0) playInAlbum(track) else playQueue(tracks, index)
     }
 
     fun next() {
@@ -993,6 +1005,10 @@ class MainViewModel(private val context: Context, private val container: AppCont
         if (now - lastAdvanceAt < 2000L) return
         lastAdvanceAt = now
         syncProgress()
+        if (current.sleepAtTrackEnd) {
+            pauseForSleep("本集播完，已停止播放")
+            return
+        }
         if (current.queueIndex < current.queue.lastIndex) {
             playQueue(current.queue, current.queueIndex + 1)
         } else {
@@ -1201,20 +1217,75 @@ class MainViewModel(private val context: Context, private val container: AppCont
         }
     }
 
-    /** [minutes] == null cancels the timer. */
+    /**
+     * Sleep timer by minutes; null cancels it.
+     *
+     * The deadline is stored and compared by the position ticker instead of
+     * being a sleeping coroutine: a delayed job is postponed by doze and would
+     * fire long after the user expects it.
+     */
     fun setSleepTimer(minutes: Int?) {
-        sleepJob?.cancel()
         if (minutes == null) {
-            _state.update { it.copy(sleepAtMillis = null) }
+            cancelSleepTimer()
             return
         }
         val deadline = System.currentTimeMillis() + minutes * 60_000L
-        _state.update { it.copy(sleepAtMillis = deadline, message = "${minutes} 分钟后停止播放") }
-        sleepJob = viewModelScope.launch {
-            delay(minutes * 60_000L)
-            stopPlayback()
-            _state.update { it.copy(sleepAtMillis = null, message = "定时关闭已触发") }
+        _state.update {
+            it.copy(
+                sleepAtMillis = deadline,
+                sleepAtTrackEnd = false,
+                message = "${minutes} 分钟后停止播放",
+            )
         }
+    }
+
+    /** Stops after the current episode instead of at a fixed time. */
+    fun setSleepAtTrackEnd() {
+        _state.update {
+            it.copy(sleepAtMillis = null, sleepAtTrackEnd = true, message = "本集播完后停止播放")
+        }
+    }
+
+    fun cancelSleepTimer() {
+        _state.update {
+            if (it.sleepAtMillis == null && !it.sleepAtTrackEnd) {
+                it
+            } else {
+                it.copy(sleepAtMillis = null, sleepAtTrackEnd = false, message = "已关闭定时")
+            }
+        }
+    }
+
+    /** Applies an expired sleep timer: true when playback was stopped. */
+    private fun sleepTimerExpired(current: UiState): Boolean {
+        val deadline = current.sleepAtMillis ?: return false
+        if (System.currentTimeMillis() < deadline) return false
+        pauseForSleep("定时关闭已触发")
+        return true
+    }
+
+    /**
+     * Pauses instead of tearing the player down.
+     *
+     * Stopping would clear the current episode, so the user would come back to
+     * "尚未选择声音" and have to find the book again; pausing keeps the bar,
+     * the queue and the position where they left off.
+     */
+    private fun pauseForSleep(message: String) {
+        if (_state.value.isPlaying) {
+            playback.toggle()
+            syncProgress()
+            sessionStartedAt = System.currentTimeMillis()
+        }
+        _state.update {
+            it.copy(
+                isPlaying = false,
+                sleepAtMillis = null,
+                sleepAtTrackEnd = false,
+                message = message,
+            )
+        }
+        ticker?.cancel()
     }
 
     /** Adds or removes the playing track from favourites. */
@@ -1678,6 +1749,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
                 val position = playback.currentPosition()
                 if (position != _position.value) _position.value = position
                 val current = _state.value
+                if (sleepTimerExpired(current)) return@launch
                 val duration = current.durationMs
                 val manual = current.skipTrimEnabled &&
                     current.skipTrimMode == teikengstudio.xmpro.player.SmartSkip.MODE_MANUAL
@@ -1708,6 +1780,8 @@ class MainViewModel(private val context: Context, private val container: AppCont
             _state.update { it.copy(subscriptions = emptyList(), updates = emptyList(), history = emptyList(), favorites = emptyList()) }
             return
         }
+        // What is already on screen decides how loudly a failure is reported.
+        val before = _state.value
         _state.update { it.copy(listeningLoading = true, listeningError = null) }
         viewModelScope.launch {
             val identity = container.activeAccount
@@ -1729,13 +1803,29 @@ class MainViewModel(private val context: Context, private val container: AppCont
             }
             // Naming the section makes a failure actionable instead of a bare
             // "首页数据无效" over a screen that mostly loaded.
-            val failure = listOf(
+            // A shelf that already has rows keeps them when only the refresh
+            // failed, so the red banner is reserved for a section that would
+            // otherwise be empty. The transient service error (ret=-1) was
+            // painting a scary bar over perfectly usable cached lists.
+            val cached = mapOf(
+                "订阅" to before.subscriptions.isNotEmpty(),
+                "更新" to before.updates.isNotEmpty(),
+                "历史" to before.history.isNotEmpty(),
+                "收藏" to before.favorites.isNotEmpty(),
+            )
+            val failed = listOf(
                 "订阅" to subscriptions,
                 "更新" to updates,
                 "历史" to records,
                 "收藏" to favorites,
-            ).firstOrNull { it.second.isFailure }
+            ).filter { it.second.isFailure }
+            val failure = failed.firstOrNull { cached[it.first] != true }
                 ?.let { (label, result) -> "${label}加载失败：${describe(result.exceptionOrNull()!!)}" }
+            val kept = if (failure == null && failed.isNotEmpty()) {
+                failed.joinToString("、") { it.first } + "刷新失败，显示的是上次结果"
+            } else {
+                null
+            }
             _state.update { state ->
                 state.copy(
                     subscriptions = subscriptions.getOrNull()?.items ?: state.subscriptions,
@@ -1752,7 +1842,43 @@ class MainViewModel(private val context: Context, private val container: AppCont
                         ?: state.favoriteIds,
                     listeningLoading = false,
                     listeningError = failure,
+                    message = kept ?: state.message,
                 )
+            }
+            fillSubscriptionTotals()
+        }
+    }
+
+    /**
+     * Fills in the episode counts the subscription feed never returns.
+     *
+     * Each album costs one light detail request, four at a time, and only for
+     * albums still missing a count, so the shelf asks once and remembers.
+     */
+    fun fillSubscriptionTotals() {
+        val snapshot = _state.value
+        val identity = container.activeAccount ?: return
+        val missing = snapshot.subscriptions
+            .map { it.album }
+            .filter { it.total <= 0 && it.id !in snapshot.subscriptionTotals }
+            .map { it.id }
+            .distinct()
+            .take(MAX_SUBSCRIPTION_TOTALS)
+        if (missing.isEmpty()) return
+        viewModelScope.launch {
+            val found = LinkedHashMap<String, Int>()
+            withContext(Dispatchers.IO) {
+                val client = container.client(identity)
+                for (chunk in missing.chunked(4)) {
+                    chunk.map { id ->
+                        async {
+                            id to runCatching { client.albumTrackCount(id) }.getOrDefault(0)
+                        }
+                    }.awaitAll().forEach { (id, count) -> if (count > 0) found[id] = count }
+                }
+            }
+            if (found.isNotEmpty()) {
+                _state.update { it.copy(subscriptionTotals = it.subscriptionTotals + found) }
             }
         }
     }
@@ -2173,6 +2299,8 @@ class MainViewModel(private val context: Context, private val container: AppCont
     companion object {
         /** Upper bound on catalogue pages a single queue extension may read. */
         private const val MAX_ALBUM_PAGES = 60
+        /** Counts are one request per album, so a shelf refresh fills a page at most. */
+        private const val MAX_SUBSCRIPTION_TOTALS = 30
 
         /** Pages fetched per round when growing the queue. */
         private const val QUEUE_PAGE_FETCH = 3
@@ -2180,7 +2308,6 @@ class MainViewModel(private val context: Context, private val container: AppCont
 
     override fun onCleared() {
         ticker?.cancel()
-        sleepJob?.cancel()
         login.clear()
         super.onCleared()
     }

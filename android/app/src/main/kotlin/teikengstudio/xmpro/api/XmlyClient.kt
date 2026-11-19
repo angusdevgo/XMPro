@@ -317,6 +317,39 @@ class XmlyClient(
     }
 
     /**
+     * Episode count for [albumId].
+     *
+     * The subscription feed returns no count at all, so the shelf asks this
+     * once per album. The track page knows the number while the detail
+     * endpoint does not consistently carry it, so one episode is requested
+     * and its `totalCount` is read.
+     */
+    fun albumTrackCount(albumId: String): Int {
+        val id = xmlyIdentifier(albumId)
+        if (id.isEmpty()) return 0
+        val payload = runCatching {
+            http.get(
+                mobile,
+                "/mobile/v1/album/track/v2",
+                query = mapOf(
+                    "albumId" to id,
+                    "pageId" to "1",
+                    "pageSize" to "1",
+                    "isAsc" to "true",
+                    "device" to "android",
+                ),
+            )
+        }.getOrNull() ?: return 0
+        val data = payload.optJSONObject("data") ?: return 0
+        val raw = data.opt("totalCount") ?: return 0
+        return when (raw) {
+            is Number -> raw.toInt()
+            is String -> raw.trim().toIntOrNull() ?: 0
+            else -> 0
+        }
+    }
+
+    /**
      * Album header metadata; the track page alone returns no album object, so
      * the title, anchor and intro come from the detail endpoint.
      */

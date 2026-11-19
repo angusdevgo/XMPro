@@ -43,12 +43,16 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.VolumeDown
+import androidx.compose.material.icons.filled.VolumeMute
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -99,6 +103,8 @@ fun PlayerSheet(
     onBookmark: () -> Unit,
     isFavorite: Boolean,
     onSleepTimer: (Int?) -> Unit,
+    onSleepAtTrackEnd: () -> Unit = {},
+    onVolume: (Float) -> Unit = {},
     onSelectQueue: (Int) -> Unit,
     onQueueRange: (Int?, Int?) -> Unit = { _, _ -> },
     onOpenAlbum: (String) -> Unit = {},
@@ -118,6 +124,8 @@ fun PlayerSheet(
     val track = state.playing
     var queueOpen by remember { mutableStateOf(false) }
     var timerOpen by remember { mutableStateOf(false) }
+    var timerCustom by remember { mutableStateOf(false) }
+    var timerCustomText by remember { mutableStateOf("") }
     var trimOpen by remember { mutableStateOf(false) }
     var speedOpen by remember { mutableStateOf(false) }
     var effectOpen by remember { mutableStateOf(false) }
@@ -290,8 +298,12 @@ fun PlayerSheet(
                 )
                 PlayerActionIcon(
                     icon = Icons.Filled.Timer,
-                    label = state.sleepAtMillis?.let { "已定时" } ?: "定时",
-                    tint = if (state.sleepAtMillis != null) {
+                    label = when {
+                        state.sleepAtTrackEnd -> "播完停"
+                        state.sleepAtMillis != null -> "已定时"
+                        else -> "定时"
+                    },
+                    tint = if (state.sleepAtMillis != null || state.sleepAtTrackEnd) {
                         MaterialTheme.colorScheme.primary
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -393,6 +405,40 @@ fun PlayerSheet(
                     formatDuration(total / 1000.0),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // Playback volume, not the device stream: it stays put when the
+            // phone is also playing notifications or another app is audible.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    when {
+                        state.playVolume <= 0.01f -> Icons.Filled.VolumeMute
+                        state.playVolume < 0.5f -> Icons.Filled.VolumeDown
+                        else -> Icons.Filled.VolumeUp
+                    },
+                    contentDescription = "音量",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+                Slider(
+                    value = state.playVolume,
+                    onValueChange = onVolume,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 8.dp),
+                )
+                Text(
+                    "${(state.playVolume * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(38.dp),
+                    textAlign = TextAlign.End,
                 )
             }
 
@@ -645,27 +691,104 @@ fun PlayerSheet(
     }
 
     if (timerOpen) {
+        val remaining = state.sleepAtMillis?.let { deadline ->
+            ((deadline - System.currentTimeMillis()) / 60_000L).coerceAtLeast(1L)
+        }
         AlertDialog(
             onDismissRequest = { timerOpen = false },
             title = { Text("定时关闭") },
-            text = { Text("到达时间后停止播放；当前设置会显示在操作栏。") },
+            text = {
+                Column {
+                    Text(
+                        when {
+                            state.sleepAtTrackEnd -> "当前会在一集播完后停止播放。"
+                            remaining != null -> "还有约 $remaining 分钟停止播放。"
+                            else -> "到达时间后停止播放。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    listOf(
+                        15 to "15 分钟",
+                        30 to "30 分钟",
+                        45 to "45 分钟",
+                        60 to "60 分钟",
+                    ).forEach { (minutes, label) ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    onSleepTimer(minutes)
+                                    timerOpen = false
+                                }
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                onSleepAtTrackEnd()
+                                timerOpen = false
+                            }
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("本集播完后", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { timerCustom = !timerCustom }
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("自定义分钟…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (timerCustom) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            OutlinedTextField(
+                                value = timerCustomText,
+                                onValueChange = { input ->
+                                    timerCustomText = input.filter(Char::isDigit).take(4)
+                                },
+                                singleLine = true,
+                                placeholder = { Text("分钟") },
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(
+                                onClick = {
+                                    val minutes = timerCustomText.toIntOrNull() ?: 0
+                                    if (minutes > 0) {
+                                        onSleepTimer(minutes)
+                                        timerCustomText = ""
+                                        timerOpen = false
+                                    }
+                                },
+                                enabled = (timerCustomText.toIntOrNull() ?: 0) > 0,
+                            ) { Text("确定") }
+                        }
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    onSleepTimer(30)
+                    onSleepTimer(null)
                     timerOpen = false
-                }) { Text("30 分钟") }
+                }) { Text("关闭定时") }
             },
             dismissButton = {
-                Row {
-                    TextButton(onClick = {
-                        onSleepTimer(null)
-                        timerOpen = false
-                    }) { Text("关闭定时") }
-                    TextButton(onClick = {
-                        onSleepTimer(60)
-                        timerOpen = false
-                    }) { Text("60 分钟") }
-                }
+                TextButton(onClick = { timerOpen = false }) { Text("取消") }
             },
         )
     }

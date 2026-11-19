@@ -205,14 +205,15 @@ class XmlyExperience(private val client: XmlyClient) {
             mapOf("pageId" to page.toString(), "sign" to "2", "size" to pageSize.toString()),
         )
         val seen = mutableSetOf<String>()
+        val rawRows = rows(data.opt("albumResults"))
         // One odd row must not cost the user the whole shelf: skip it and keep
         // the rest, the same way the album page tolerates messy metadata.
-        val items = rows(data.opt("albumResults")).take(pageSize).mapNotNull { row ->
+        val items = rawRows.take(pageSize).mapNotNull { row ->
             if (text(row.opt("albumId")).isEmpty()) return@mapNotNull null
             val album = subscriptionAlbum(row)
-            if (!seen.add(album.id)) {
-                throw XmlyException("repeated_page", "订阅列表重复，请刷新后重试")
-            }
+            // A repeated album would cost the user the whole shelf, so the
+            // duplicate is dropped instead; pagination still advances.
+            if (!seen.add(album.id)) return@mapNotNull null
             SubscriptionItem(
                 album = album,
                 latestTitle = text(row.opt("trackTitle")),

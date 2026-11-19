@@ -165,7 +165,13 @@ class XmlyHttp(
             awaitCooldown(origin)
             try {
                 val outcome = send(method, origin, path, query, body, form, credentials, signed, responseLimit, headers)
-                return interpret(outcome, origin, credentials != null, retryAfter(outcome.retryAfter))
+                return interpret(
+                    outcome = outcome,
+                    origin = origin,
+                    authenticated = credentials != null,
+                    retryAfterHeader = retryAfter(outcome.retryAfter),
+                    readOnly = readOnly,
+                )
             } catch (retry: Retryable) {
                 if (!readOnly || attempt == MAX_ATTEMPTS - 1) {
                     throw XmlyException(
@@ -251,6 +257,7 @@ class XmlyHttp(
         origin: String,
         authenticated: Boolean,
         retryAfterHeader: Duration? = null,
+        readOnly: Boolean = true,
     ): JSONObject {
         val status = outcome.status
         if (status == 429) {
@@ -317,6 +324,14 @@ class XmlyHttp(
                     "请求校验失败（设备时间与服务端偏差过大），请校准时间后重试",
                     definitive = true,
                 )
+            }
+            if (code == "-1") {
+                // "unexpected error": the service answers this intermittently,
+                // and the very same request usually succeeds straight after.
+                // For a read that is worth another attempt; for a write the
+                // outcome is genuinely unknown, so it is never replayed.
+                if (readOnly) throw Retryable()
+                throw XmlyException("uncertain", "请求结果未知，请核对后重试")
             }
             // The business code is included so a failure can be matched against
             // the official client instead of guessing.

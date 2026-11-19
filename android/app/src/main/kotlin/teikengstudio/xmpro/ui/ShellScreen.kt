@@ -206,14 +206,11 @@ fun ShellScreen(
                         onRefresh = viewModel::refreshListening,
                         onRefreshHistory = viewModel::refreshHistory,
                         onOpenAlbum = viewModel::openAlbum,
-                        onPlay = { track, positionMs ->
-                            if (positionMs > 0) {
-                                // History entries carry a saved position.
-                                viewModel.playInAlbum(track, positionMs)
-                            } else {
-                                viewModel.playUpdates(track)
-                            }
-                        },
+                        // History rows always resolve through their album: the
+                        // saved position may legitimately be zero, and routing
+                        // those to the update feed made the tap do nothing.
+                        onPlay = { track, positionMs -> viewModel.playInAlbum(track, positionMs) },
+                        onPlayUpdate = viewModel::playUpdates,
                         onUnsubscribe = { viewModel.setSubscribed(it, false) },
                         onUnfavorite = { viewModel.setFavorite(it, false) },
                         onLoadMoreUpdates = viewModel::loadMoreUpdates,
@@ -270,6 +267,10 @@ fun ShellScreen(
                         onPlayDownload = { viewModel.play(it) },
                         onCloseSocial = viewModel::closeSocial,
                         onOpenUser = viewModel::openUser,
+                        onOpenAlbum = { albumId ->
+                            viewModel.closeSocial()
+                            viewModel.openAlbum(albumId)
+                        },
                         onExportBackup = viewModel::exportBackup,
                         onImportBackup = viewModel::importBackup,
                         smsLogin = remember(viewModel) {
@@ -385,6 +386,8 @@ fun ShellScreen(
                     isFavorite = state.playing?.let { track -> track.id in state.favoriteIds } == true,
                     onBookmark = viewModel::saveBookmark,
                     onSleepTimer = viewModel::setSleepTimer,
+                    onSleepAtTrackEnd = viewModel::setSleepAtTrackEnd,
+                    onVolume = viewModel::setVolume,
                     onSelectQueue = { index ->
                         viewModel.playQueue(state.queue, index)
                     },

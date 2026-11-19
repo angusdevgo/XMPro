@@ -248,6 +248,7 @@ fun SettingsScreen(
     onPlayDownload: (teikengstudio.xmpro.model.Track) -> Unit = {},
     onCloseSocial: () -> Unit,
     onOpenUser: (String) -> Unit,
+    onOpenAlbum: (String) -> Unit = {},
     onExportBackup: (android.net.Uri, Boolean) -> Unit,
     onImportBackup: (android.net.Uri) -> Unit,
     smsLogin: SmsLoginCallbacks,
@@ -531,7 +532,13 @@ fun SettingsScreen(
     }
 
     state.socialKind?.let { kind ->
-        SocialSheet(kind = kind, state = state, onDismiss = onCloseSocial, onOpenUser = onOpenUser)
+        SocialSheet(
+            kind = kind,
+            state = state,
+            onDismiss = onCloseSocial,
+            onOpenUser = onOpenUser,
+            onOpenAlbum = onOpenAlbum,
+        )
     }
 
     renameTarget?.let { identity ->
@@ -1516,6 +1523,7 @@ private fun SocialSheet(
     state: UiState,
     onDismiss: () -> Unit,
     onOpenUser: (String) -> Unit,
+    onOpenAlbum: (String) -> Unit = {},
 ) {
     val title = when (kind) {
         "following" -> "\u5173\u6ce8"
@@ -1575,13 +1583,22 @@ private fun SocialSheet(
 
                 "subscriptions" -> {
                     items(state.subscriptions, key = { it.album.id }) { item ->
+                        // The feed carries no episode count, so the shelf fills
+                        // it in; until then the latest episode still says
+                        // something useful instead of "0 集".
+                        val total = state.subscriptionTotals[item.album.id] ?: item.album.total
                         SocialRow(
                             title = item.album.title,
                             subtitle = listOfNotNull(
                                 item.album.artist.takeIf { it.isNotEmpty() },
-                                item.album.total.toString() + " \u96c6",
+                                total.takeIf { it > 0 }?.let { "\u5171 " + it + " \u96c6" },
+                                item.latestTitle.takeIf { it.isNotEmpty() },
                             ).joinToString(" \u00b7 "),
                             avatar = item.album.coverUrl,
+                            onClick = {
+                                onDismiss()
+                                onOpenAlbum(item.album.id)
+                            },
                         )
                     }
                     if (state.subscriptions.isEmpty()) item { SheetEmpty("\u6682\u65e0\u8ba2\u9605") }

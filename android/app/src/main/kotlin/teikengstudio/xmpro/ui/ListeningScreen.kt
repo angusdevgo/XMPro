@@ -82,6 +82,8 @@ fun ListeningScreen(
     onRefresh: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     onPlay: (Track, Long) -> Unit,
+    /** Episodes of the update feed belong to a queue the feed itself defines. */
+    onPlayUpdate: (Track) -> Unit = { track -> onPlay(track, 0) },
     onUnsubscribe: (String) -> Unit,
     onUnfavorite: (Track) -> Unit,
     onLoadMoreUpdates: () -> Unit,
@@ -211,7 +213,7 @@ fun ListeningScreen(
                     bottomInset = bottomInset,
                     filter = filtered,
                     onOpenAlbum = onOpenAlbum,
-                    onPlay = onPlay,
+                    onPlayUpdate = onPlayUpdate,
                     onLoadMore = onLoadMoreUpdates,
                     onBarsHidden = onBarsHidden,
                 )
@@ -357,7 +359,8 @@ private fun UpdatesTab(
     bottomInset: Dp,
     filter: (String) -> Boolean,
     onOpenAlbum: (String) -> Unit,
-    onPlay: (Track, Long) -> Unit,
+    // Update episodes are played from the feed's own queue, not their album.
+    onPlayUpdate: (Track) -> Unit,
     onLoadMore: () -> Unit,
     onBarsHidden: (Boolean) -> Unit = {},
 ) {
@@ -429,7 +432,7 @@ private fun UpdatesTab(
         datedItems(visible, { it.publishedAt }, { item ->
             TrackLine(
                 track = item.track,
-                onPlay = { onPlay(item.track, 0) },
+                onPlay = { onPlayUpdate(item.track) },
                 onOpenAlbum = onOpenAlbum,
             )
         })
@@ -464,7 +467,13 @@ private fun SubscriptionsTab(
         contentPadding = PaddingValues(top = 4.dp, bottom = bottomInset),
     ) {
         datedItems(visible, { it.updatedAt }, { item ->
-            SubscriptionLine(item, onOpenAlbum, onUnsubscribe)
+            // The feed omits episode counts; the shelf fills them in later.
+            SubscriptionLine(
+                item = item,
+                total = state.subscriptionTotals[item.album.id] ?: item.album.total,
+                onOpenAlbum = onOpenAlbum,
+                onUnsubscribe = onUnsubscribe,
+            )
         })
         item {
             if (state.moreSubscriptions) {
@@ -881,6 +890,7 @@ private fun TrackLine(
 @Composable
 private fun SubscriptionLine(
     item: SubscriptionItem,
+    total: Int,
     onOpenAlbum: (String) -> Unit,
     onUnsubscribe: (String) -> Unit,
 ) {
@@ -916,7 +926,9 @@ private fun SubscriptionLine(
                     }
                 }
                 Text(
-                    item.latestTitle.ifEmpty { "${item.album.total} 集" },
+                    item.latestTitle.ifEmpty {
+                        if (total > 0) "\u5171 $total \u96c6" else item.album.artist
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

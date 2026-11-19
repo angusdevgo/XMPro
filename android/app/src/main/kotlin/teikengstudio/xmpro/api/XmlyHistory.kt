@@ -41,11 +41,12 @@ class XmlyHistory(
                 "GET",
                 XmlyClient.MOBILE,
                 "/nyx/v1/history/query/android",
+                // timeStamp is not sent: the service answers ret=-1 to any
+                // query that carries one, and it is not needed for paging.
                 query = mapOf(
                     "pageId" to page.toString(),
                     "pageSize" to "100",
                     "syncPoint" to "0",
-                    "timeStamp" to clock().toString(),
                     "uid" to (context["uid"] ?: ""),
                 ),
             )
@@ -93,7 +94,6 @@ class XmlyHistory(
                     "pageId" to page.toString(),
                     "pageSize" to "100",
                     "syncPoint" to "0",
-                    "timeStamp" to clock().toString(),
                     "uid" to (context["uid"] ?: ""),
                 ),
             )
