@@ -223,6 +223,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
      * start over the track the user picked afterwards.
      */
     private var playRequest = 0
+    /** Guards the automatic recovery so a dead stream cannot loop for ever. */
+    private var recoverTrack: String? = null
+    private var recoverAttempts = 0
 
     private var sessionTrack: Track? = null
     private var sessionStartedAt = 0L
@@ -292,7 +295,7 @@ class MainViewModel(private val context: Context, private val container: AppCont
         // The service owns the player; mirror its state into the UI model.
         viewModelScope.launch {
             playback.error.collect { failure ->
-                if (failure != null) _state.update { it.copy(message = failure) }
+                if (failure != null) recoverPlayback(failure)
             }
         }
         viewModelScope.launch {
@@ -305,7 +308,12 @@ class MainViewModel(private val context: Context, private val container: AppCont
                     )
                 }
                 publishPosition()
-                if (player.playing) startTicker() else ticker?.cancel()
+                if (player.playing) {
+                    playbackRecovered()
+                    startTicker()
+                } else {
+                    ticker?.cancel()
+                }
             }
         }
         // The notification and Bluetooth controls live in the service, which owns
@@ -1286,6 +1294,56 @@ class MainViewModel(private val context: Context, private val container: AppCont
             )
         }
         ticker?.cancel()
+    }
+
+    /**
+     * Re-resolves the stream and resumes where it stopped.
+     *
+     * Half of the "it paused by itself" reports are a stream that stopped
+     * answering: the signed URL had expired, or the connection dropped while
+     * the screen was off. Re-resolving is what the user's own tap would do, so
+     * it happens automatically; two failures in a row are reported instead of
+     * retrying for ever.
+     */
+    private fun recoverPlayback(failure: teikengstudio.xmpro.player.PlaybackController.Failure) {
+        val current = _state.value
+        val track = current.playing
+        if (track == null) {
+            _state.update { it.copy(message = failure.message) }
+            return
+        }
+        if (recoverTrack != track.id) {
+            recoverTrack = track.id
+            recoverAttempts = 0
+        }
+        if (recoverAttempts >= MAX_PLAYBACK_RECOVERIES) {
+            _state.update { it.copy(message = failure.message) }
+            return
+        }
+        recoverAttempts++
+        _state.update { it.copy(message = "播放中断，正在恢复…") }
+        val resumeAt = failure.positionMs
+        // A short pause first: a socket that dropped for a second is back by
+        // then, and re-resolving immediately would just fail again and use up
+        // the budget.
+        viewModelScope.launch {
+            delay(RECOVERY_DELAY_MS)
+            val latest = _state.value
+            // The user may have moved on while this was waiting.
+            if (latest.playing?.id != track.id || latest.isPlaying) return@launch
+            val index = latest.queue.indexOfFirst { it.id == track.id }
+            if (index >= 0) {
+                playQueue(latest.queue, index, resumeAt)
+            } else {
+                play(track, resumeAt)
+            }
+        }
+    }
+
+    /** Clears the recovery budget once playback is healthy again. */
+    private fun playbackRecovered() {
+        recoverTrack = null
+        recoverAttempts = 0
     }
 
     /** Adds or removes the playing track from favourites. */
@@ -2301,6 +2359,9 @@ class MainViewModel(private val context: Context, private val container: AppCont
         private const val MAX_ALBUM_PAGES = 60
         /** Counts are one request per album, so a shelf refresh fills a page at most. */
         private const val MAX_SUBSCRIPTION_TOTALS = 30
+        /** Covers an expired URL plus a couple of dropped sockets. */
+        private const val MAX_PLAYBACK_RECOVERIES = 3
+        private const val RECOVERY_DELAY_MS = 2_000L
 
         /** Pages fetched per round when growing the queue. */
         private const val QUEUE_PAGE_FETCH = 3

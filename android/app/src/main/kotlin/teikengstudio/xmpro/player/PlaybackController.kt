@@ -31,9 +31,12 @@ class PlaybackController(private val context: Context) {
     private val _state = MutableStateFlow(PlaybackUi())
     val state: StateFlow<PlaybackUi> = _state.asStateFlow()
 
+    /** A player failure with where playback was when it happened. */
+    class Failure(val message: String, val positionMs: Long)
+
     /** Last player failure; surfaced to the UI instead of failing silently. */
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error.asStateFlow()
+    private val _error = MutableStateFlow<Failure?>(null)
+    val error: StateFlow<Failure?> = _error.asStateFlow()
 
     /**
      * Emits the media id of the item that ran to its end.
@@ -53,10 +56,14 @@ class PlaybackController(private val context: Context) {
             val httpCode = error.cause?.let { cause ->
                 (cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
             }
-            _error.value = when {
-                httpCode != null -> "播放失败：服务端返回 HTTP $httpCode"
-                else -> "播放失败：${error.errorCodeName}"
-            }
+            val where = (controller?.currentPosition ?: _state.value.positionMs).coerceAtLeast(0)
+            _error.value = Failure(
+                message = when {
+                    httpCode != null -> "播放失败：服务端返回 HTTP $httpCode"
+                    else -> "播放失败：${error.errorCodeName}"
+                },
+                positionMs = where,
+            )
             _state.update { it.copy(playing = false) }
         }
 
@@ -144,7 +151,21 @@ class PlaybackController(private val context: Context) {
         }
     }
 
-    fun toggle() = withController { if (it.isPlaying) it.pause() else it.play() }
+    /**
+     * Play/pause from the UI or the notification.
+     *
+     * A finished item has to be rewound first: ExoPlayer ignores plain play()
+     * at STATE_ENDED, which made the button look broken right after an episode
+     * ran out.
+     */
+    fun toggle() = withController { media ->
+        if (media.isPlaying) {
+            media.pause()
+        } else {
+            if (media.playbackState == Player.STATE_ENDED) media.seekTo(0)
+            media.play()
+        }
+    }
 
     fun currentPosition(): Long = controller?.currentPosition ?: _state.value.positionMs
 

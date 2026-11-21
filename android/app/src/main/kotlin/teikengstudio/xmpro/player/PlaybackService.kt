@@ -1,6 +1,8 @@
 package teikengstudio.xmpro.player
 
 import android.os.Bundle
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -131,6 +133,21 @@ class PlaybackService : MediaSessionService() {
             .setRenderersFactory(SmartSkip.renderersFactory(this))
             .build()
             .apply {
+                // Without a declared focus request the app played over every
+                // other sound and never took part in the system's focus rules:
+                // a call or a voice message left the stream in an undefined
+                // state instead of pausing and resuming it.
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+                        .build(),
+                    /* handleAudioFocus = */ true,
+                )
+                // Long listens happen with the screen off; without this the
+                // network radio is allowed to sleep mid-episode and the stream
+                // simply stops where the buffer ran out.
+                setWakeMode(C.WAKE_MODE_NETWORK)
                 setHandleAudioBecomingNoisy(true)
             }
         // The session id only exists once an audio renderer is attached, and it
